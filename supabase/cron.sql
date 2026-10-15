@@ -1,0 +1,3 @@
+-- pg_cron jobs on zo-platform (created 2026-10-15). The secret is read from zo_config at run time; it never appears in the job text.
+-- velomna_night  '*/15 * * * *'      POST /velomna-api/night/run   (the function itself refuses nights younger than 85 min and sleeps when no human dreamed in 6 h)
+-- velomna_agents '7,22,37,52 * * * *' POST /velomna-api/agents/tick (six Minds act or read once each; rest when idle)
