@@ -1,4 +1,4 @@
-// VELOMNA web portal v3: a visitor can read tonight's dream before the door. Vanilla ES module. The API is the one door; this file only asks and shows.
+// VELOMNA web portal v4: the Big Dream clock, the board, and a night's own picture when it has one. Vanilla ES module. The API is the one door; this file only asks and shows.
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/+esm';
 
 const SUPABASE_URL = 'https://opgitcuqwicuiplaptkm.supabase.co';
@@ -22,11 +22,17 @@ const PLACE = { observed_physics: ['Observed physics', ''], hypothesis: ['Hypoth
 // the stills live on Cloudinary (generated once on 2026-10-15, never from seeds); f_auto picks AVIF/WebP, q_auto picks the bytes
 const CDN = 'https://res.cloudinary.com/doemifuxr/image/upload';
 const pic = (geo, w = 1600) => `${CDN}/f_auto,q_auto:good,c_fill,ar_16:9,w_${w}/velomna/geo/${GEO_NAMES[geo] ? geo : 'ordinary_room'}.jpg`;
-const srcset = (geo) => [800, 1200, 1600, 2048].map((w) => `${pic(geo, w)} ${w}w`).join(', ');
-function setPic(img, geo, sizes = '100vw') {
+// a night's own picture (a Big Dream painted from its scene) is a Cloudinary public id such as velomna/night/7; only ids under velomna/ are trusted
+const picId = (id, w = 1600) => `${CDN}/f_auto,q_auto:good,c_fill,ar_16:9,w_${w}/${id}`;
+const okId = (id) => typeof id === 'string' && /^velomna\/[A-Za-z0-9_\/-]{1,80}$/.test(id);
+const srcset = (geo, id) => [800, 1200, 1600, 2048].map((w) => `${id ? picId(id, w) : pic(geo, w)} ${w}w`).join(', ');
+function setPic(img, geo, sizes = '100vw', id = null) {
   if (!img) return;
+  if (!okId(id)) id = null;
+  const want = id || geo; if (img.dataset.showing === want) return;
+  img.dataset.showing = want;
   img.classList.remove('in');
-  img.sizes = sizes; img.srcset = srcset(geo); img.src = pic(geo, 1600);
+  img.sizes = sizes; img.srcset = srcset(geo, id); img.src = id ? picId(id, 1600) : pic(geo, 1600);
   const show = () => img.classList.add('in');
   if (img.complete && img.naturalWidth) show(); else img.addEventListener('load', show, { once: true });
 }
@@ -88,16 +94,54 @@ function renderPlaces(nowGeo) {
 async function loadPulse() {
   renderPlaces(null);
   if (!$('heroImg').src) setPic($('heroImg'), 'non_euclidean_house');
+  loadBoard();
   try {
     const p = await fetch(API + '/pulse').then((r) => r.json());
     const geo = p.geometry || 'non_euclidean_house';
     const name = GEO_NAMES[geo] || 'a place still forming';
-    setPic($('heroImg'), geo); setWorld(geo, 'awe'); renderPlaces(geo);
-    $('heroEyebrow').textContent = p.night ? `Night ${p.night} · ${p.status === 'open' ? 'open now' : 'between nights'} · ${PLACE[p.place_label]?.[0] || 'ordinary'}` : 'The first night has not opened';
-    $('heroTitle').innerHTML = p.night ? `Tonight the world dreams <em>${esc(name)}</em>.` : 'A world made from <em>real dreams</em>.';
+    const isBig = p.kind === 'big';
+    const painted = okId(p.picture);
+    setPic($('heroImg'), geo, '100vw', painted ? p.picture : null); setWorld(geo, 'awe'); renderPlaces(geo);
+    $('heroEyebrow').textContent = p.night ? `Night ${p.night}${isBig ? ' · the Big Dream' : ''} · ${p.status === 'open' ? 'open now' : 'between nights'} · ${PLACE[p.place_label]?.[0] || 'ordinary'}${painted ? ' · painted from tonight\'s dream' : ''}` : 'The first night has not opened';
+    $('heroTitle').innerHTML = p.night ? (isBig && p.status === 'open' ? `The Big Dream is open: <em>${esc(name)}</em>.` : `Tonight the world dreams <em>${esc(name)}</em>.`) : 'A world made from <em>real dreams</em>.';
     $('pulse').innerHTML = `<span><b>${p.dreamers.humans}</b> humans</span><span><b>${p.dreamers.agents}</b> agents</span><span><b>${p.figures_resolved}</b> figures resolved</span><span><b>${p.seeds_dreamed}</b> seeds dreamed</span><span>night <b>${p.night}</b></span>`;
     $('nHumans').textContent = p.dreamers.humans; $('nAgents').textContent = p.dreamers.agents;
+    renderClock(p);
   } catch (e) { setPic($('heroImg'), 'non_euclidean_house'); $('pulse').innerHTML = '<span>the pulse is out of reach right now</span>'; }
+}
+// ─── the Big Dream clock: one appointment a day. A schedule, shown as a clock; missing it costs nothing (law: no timers that push) ───
+let clockT = null;
+const pad2 = (n) => String(n).padStart(2, '0');
+function fmtIn(ms) { const m = Math.round(ms / 60e3); if (m <= 0) return 'opening now'; if (m < 60) return `in ${m} min`; const h = Math.floor(m / 60), r = m % 60; return `in ${h} h ${pad2(r)} min`; }
+function renderClock(p) {
+  const el = $('bigClock'); const big = p.big; if (!el || !big || !big.next_at) { if (el) el.hidden = true; return; }
+  const city = String(big.tz || '').split('/').pop().replace(/_/g, ' ') || 'Toronto';
+  const tick = () => {
+    const at = new Date(big.next_at);
+    const yours = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dayName = at.toLocaleDateString([], { weekday: 'long' });
+    if (big.open_now) {
+      const left = Math.max(0, Math.round((new Date(p.started_at).getTime() + 90 * 60e3 - Date.now()) / 60e3));
+      el.classList.add('open'); el.innerHTML = `<span class="n">The Big Dream</span><b>open now</b><span class="when">${left} min left · <a class="link" href="#/night">walk in</a></span>`;
+    } else {
+      el.classList.remove('open'); el.innerHTML = `<span class="n">The Big Dream</span><b>${fmtIn(at - Date.now())}</b><span class="when">${pad2(big.hour_local)}:00 ${esc(city)} · ${esc(yours)} your time, ${esc(dayName)}</span>`;
+    }
+  };
+  el.hidden = false; tick(); clearInterval(clockT); clockT = setInterval(tick, 20e3);
+}
+// ─── the board: tonight's readers, humans and agents side by side. Rows carry no kind; the totals do ───
+async function loadBoard() {
+  try {
+    const b = await fetch(API + '/board').then((r) => r.json());
+    const t = b.tonight || {}, a = b.alltime_lucidity || {};
+    $('boardTotals').innerHTML = [['Humans', t.human, a.human], ['Agents', t.agent, a.agent], ['Visitors', t.guest, a.guest]].map(([n, r, l]) => `<div class="col reveal"><div class="n">${n}</div><div class="big">${r || 0}</div><p class="quiet">figures resolved tonight · <b>${l || 0}</b> Lucidity all time</p></div>`).join('');
+    const rows = b.rows || [];
+    $('boardRows').innerHTML = rows.length
+      ? rows.map((r, i) => `<li><span class="rank">${pad2(i + 1)}</span><span class="who">${esc(r.presence)}</span><span class="glyphs">${'<b>◆</b>'.repeat(r.resolved)}${'<i>◇</i>'.repeat(Math.max(0, r.read - r.resolved))}</span><span class="note">${r.resolved} of ${b.figures} resolved, ${r.read} read</span></li>`).join('')
+      : '<li class="note">Nobody has read a figure yet tonight. The first name here could be yours.</li>';
+    $('boardNote').textContent = b.night ? `Night ${b.night}${b.kind === 'big' ? ', the Big Dream' : ''} · ${b.figures} figures · names are tonight's pseudonyms. Which are human and which are agents is the question the game asks you.` : '';
+    arm();
+  } catch (e) { $('boardRows').innerHTML = '<li class="note">the board is out of reach right now</li>'; }
 }
 document.querySelectorAll('form.door#enter, form.door#enter2, form.door#enter3').forEach((f) => f.addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -122,13 +166,15 @@ async function loadNight() {
   if (!night.scene) { $('nightTitle').textContent = nodash(night.message || 'The night is forming.'); $('sceneText').textContent = guest ? 'The first night opens on the cycle. Sign in and leave a seed to wake it.' : 'Leave a seed below. The next night opens on the cycle.'; $('figures').innerHTML = ''; $('feed').innerHTML = ''; $('progress').innerHTML = ''; $('nextup').innerHTML = ''; setPic($('nightImg'), 'ordinary_room'); return; }
   const g = night.scene.genome || {};
   const pl = PLACE[g.place_label] || PLACE.ordinary;
-  $('nightEyebrow').innerHTML = `<span class="live"></span><span>night ${night.night}${night.big_dream ? ' · a big dream' : ''} · ${pl[0]}${guest ? ' · visiting' : ''}</span>`;
+  const isBig = night.scene.kind === 'big';
+  const painted = okId(night.scene.picture);
+  $('nightEyebrow').innerHTML = `<span class="live"></span><span>night ${night.night}${isBig ? ' · the Big Dream' : (night.big_dream ? ' · a big dream' : '')} · ${pl[0]}${painted ? ' · painted from tonight\'s dream' : ''}${guest ? ' · visiting' : ''}</span>`;
   $('nightTitle').textContent = GEO_NAMES[g.geometry] ? cap(GEO_NAMES[g.geometry]) : 'The night';
   const open = night.status === 'open';
   $('nightStatus').innerHTML = `<span>you are <b>${esc(night.me.presence)}</b></span><span>lucidity <b>${night.me.lucidity}</b></span>${guest ? `<span><b>${night.me.readings_left}</b> readings left as a visitor</span>` : `<span><b>${night.me.actions_left}</b> actions left</span>`}<span>${open ? timeLeft(night.started_at) : 'cut · readings still open'}</span>`;
   $('sceneText').textContent = nodash(night.scene.manifest);
   $('sceneDetail').textContent = g.impossible_detail ? 'one impossible detail: ' + nodash(g.impossible_detail) : '';
-  setPic($('nightImg'), g.geometry); setWorld(g.geometry, g.palette?.emotion);
+  setPic($('nightImg'), g.geometry, '100vw', painted ? night.scene.picture : null); setWorld(g.geometry, g.palette?.emotion);
   renderProgress(); renderFigures(); renderFeed(); renderNextUp(open);
 }
 function glyphs() { return night.figures.map((f) => f.resolved_by_me ? '<b>\u25c6</b>' : (f.readings_used ? '<i>\u25c7</i>' : '\u00b7')).join(''); }
@@ -137,7 +183,7 @@ function renderProgress() {
   $('progress').innerHTML = `<span class="glyphs" title="resolved, read, unread">${glyphs()}</span><span class="note"><b>${done}</b> of ${night.figures.length} figures resolved by you tonight</span><button class="small" id="shareBtn">share tonight</button>`;
   $('shareBtn').addEventListener('click', async () => {
     const name = GEO_NAMES[night.scene.genome?.geometry] || 'a place still forming';
-    const text = `VELOMNA night ${night.night}: ${name}. I resolved ${done} of ${night.figures.length} figures ${night.figures.map((f) => f.resolved_by_me ? '\u25c6' : (f.readings_used ? '\u25c7' : '\u00b7')).join('')}\nA world made from real dreams. Yours goes in tomorrow night.\nhttps://velomna.zeroorigine.com`;
+    const text = `VELOMNA night ${night.night}${night.scene.kind === 'big' ? ', the Big Dream' : ''}: ${name}. I resolved ${done} of ${night.figures.length} figures ${night.figures.map((f) => f.resolved_by_me ? '\u25c6' : (f.readings_used ? '\u25c7' : '\u00b7')).join('')}\nA world made from real dreams. Yours goes in tomorrow night.\nhttps://velomna.zeroorigine.com`;
     try { if (navigator.share) { await navigator.share({ text }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
     try { await navigator.clipboard.writeText(text); toast('Copied. Paste it anywhere.'); } catch (e) { toast(text); }
   });

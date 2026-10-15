@@ -1,4 +1,4 @@
-// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v6: guests read before they sign in; readings allowed on a cut night; guest row becomes the human on first sign-in.
+// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v7.1 (echoes never on the board): the Big Dream at a fixed local hour every day, painted when Cloudinary keys exist; a public board; v6 guests kept.
 // Humans (Supabase JWT) and agents (x-velomna-agent-key) get byte-identical responses.
 // Nothing below this door ever returns a latent. Costs are ledgered in zo_cost_logs.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -15,6 +15,8 @@ const GUEST_READINGS_PER_NIGHT = 3; // a visitor can read three figures a night 
 const NIGHT_MINUTES = 90;
 const IDLE_HOURS = 6;
 const COST_IN = 1.0 / 1e6, COST_OUT = 5.0 / 1e6; // haiku-class, USD per token
+const BIG_WINDOW_MIN = 20; // the cron ticks every 15 min; the Big Dream opens on the first tick inside [hour:00, hour:20)
+const BIG_POOL = 14; // a Big Dream condenses more seeds than a regular night (10)
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -193,7 +195,7 @@ async function observe(d: Dreamer) {
   const used = await actionsTonight(d.id, scene.id);
   return {
     night: night.night, status: night.status, started_at: night.started_at, cut_at: night.cut_at, big_dream: night.big_dream,
-    scene: { id: scene.id, manifest: scene.manifest, genome: publicGenome(scene.genome) },
+    scene: { id: scene.id, manifest: scene.manifest, genome: publicGenome(scene.genome), picture: scene.picture_id ?? null, kind: night.kind ?? "night" },
     figures: (figures ?? []).map((f) => ({
       ...f,
       resolved_by_me: (mine ?? []).some((r) => r.figure_id === f.id && r.verdict === "resolved"),
@@ -327,11 +329,47 @@ async function pulse() {
   const scene = night ? await sceneOf(m.id, night.night) : null;
   const { count: humans } = await admin.from("velomna_dreamers").select("id", { count: "exact", head: true }).eq("matrix_id", m.id).eq("kind", "human");
   const { count: agents } = await admin.from("velomna_dreamers").select("id", { count: "exact", head: true }).eq("matrix_id", m.id).eq("kind", "agent");
-  const { count: resolved } = await admin.from("velomna_readings").select("id", { count: "exact", head: true }).eq("verdict", "resolved");
+  const resolved = await resolvedByPlayers();
   const { count: seeds } = await admin.from("velomna_seeds").select("id", { count: "exact", head: true }).in("source", ["dream", "day", "machine"]);
-  return { matrix: m.name, night: night?.night ?? 0, status: night?.status ?? "unborn", started_at: night?.started_at ?? null,
-    geometry: scene?.genome?.geometry ?? null, place_label: scene?.genome?.place_label ?? null,
-    dreamers: { humans: humans ?? 0, agents: agents ?? 0 }, figures_resolved: resolved ?? 0, seeds_dreamed: seeds ?? 0 };
+  const nb = await nextBigAt();
+  return { matrix: m.name, night: night?.night ?? 0, status: night?.status ?? "unborn", started_at: night?.started_at ?? null, kind: night?.kind ?? "night",
+    geometry: scene?.genome?.geometry ?? null, place_label: scene?.genome?.place_label ?? null, picture: scene?.picture_id ?? null,
+    big: { next_at: nb.at.toISOString(), hour_local: nb.hour, tz: nb.tz, open_now: !!night && night.kind === "big" && night.status === "open" },
+    dreamers: { humans: humans ?? 0, agents: agents ?? 0 }, figures_resolved: resolved, seeds_dreamed: seeds ?? 0 };
+}
+// echoes are seeds, not players: the public numbers count humans, agents and visitors only (a retired drill dreamer is kind 'echo')
+async function echoIds(): Promise<string[]> { const { data } = await admin.from("velomna_dreamers").select("id").eq("kind", "echo"); return (data ?? []).map((d) => d.id); }
+async function resolvedByPlayers(): Promise<number> {
+  const ids = await echoIds();
+  let q = admin.from("velomna_readings").select("id", { count: "exact", head: true }).eq("verdict", "resolved");
+  if (ids.length) q = q.not("dreamer_id", "in", `(${ids.join(",")})`);
+  const { count } = await q; return count ?? 0;
+}
+
+// ───────────── the board: who read tonight, humans and agents side by side, no one's kind revealed per row ─────────────
+async function board() {
+  const m = await openMatrix();
+  const night = await currentNight(m.id);
+  const scene = night ? await sceneOf(m.id, night.night) : null;
+  const { count: figures } = scene ? await admin.from("velomna_figures").select("id", { count: "exact", head: true }).eq("scene_id", scene.id) : { count: 0 };
+  const { data: reads } = scene ? await admin.from("velomna_readings").select("dreamer_id, figure_id, verdict").eq("scene_id", scene.id) : { data: [] };
+  const ids = Array.from(new Set((reads ?? []).map((r) => r.dreamer_id)));
+  const { data: who } = ids.length ? await admin.from("velomna_dreamers").select("id, kind").in("id", ids) : { data: [] };
+  const kindOf: Record<string, string> = {}; for (const w of who ?? []) kindOf[w.id] = w.kind;
+  const per: Record<string, { resolved: Set<string>; read: Set<string> }> = {};
+  for (const r of reads ?? []) { per[r.dreamer_id] ??= { resolved: new Set(), read: new Set() }; per[r.dreamer_id].read.add(r.figure_id); if (r.verdict === "resolved") per[r.dreamer_id].resolved.add(r.figure_id); }
+  const totals = { human: 0, agent: 0, guest: 0 } as Record<string, number>;
+  const rows = [];
+  for (const [id, v] of Object.entries(per)) { const k = kindOf[id] ?? "human"; if (k === "echo") continue; totals[k] = (totals[k] ?? 0) + v.resolved.size; rows.push({ presence: await presenceOf(id, night!.night), resolved: v.resolved.size, read: v.read.size }); }
+  rows.sort((a, b) => b.resolved - a.resolved || b.read - a.read);
+  // all time: lucidity earned by kind (sum of positive deltas)
+  const { data: luc } = await admin.from("velomna_lucidity").select("dreamer_id, delta");
+  const lids = Array.from(new Set((luc ?? []).map((l) => l.dreamer_id)));
+  const { data: lwho } = lids.length ? await admin.from("velomna_dreamers").select("id, kind").in("id", lids) : { data: [] };
+  const lk: Record<string, string> = {}; for (const w of lwho ?? []) lk[w.id] = w.kind;
+  const alltime = { human: 0, agent: 0, guest: 0 } as Record<string, number>;
+  for (const l of luc ?? []) { if (Number(l.delta) > 0) { const k = lk[l.dreamer_id] ?? "human"; if (k === "echo") continue; alltime[k] = (alltime[k] ?? 0) + Number(l.delta); } }
+  return { night: night?.night ?? 0, kind: night?.kind ?? "night", status: night?.status ?? "unborn", figures: figures ?? 0, tonight: totals, rows: rows.slice(0, 12), alltime_lucidity: alltime };
 }
 
 // ───────────── bring your own agent: a signed-in human registers up to two agents and gets each key ONCE ─────────────
@@ -346,6 +384,60 @@ async function registerAgent(d: Dreamer, handle: string, persona: string) {
     .insert({ kind: "agent", handle, persona, matrix_id: d.matrix_id, agent_key_hash: await sha256(key), operator: d.user_id }).select("id").single();
   if (error) throw error;
   return json({ agent_id: data.id, handle, key, note: "Shown once. Send it as the x-velomna-agent-key header. Your agent has the same four verbs and the same forty actions a night as you." });
+}
+
+// ───────────── the clock: one fixed local hour a day, whatever the timezone does ─────────────
+async function bigHour() { const h = Number(await cfg("VELOMNA_BIG_DREAM_HOUR")); return Number.isInteger(h) && h >= 0 && h < 24 ? h : 21; }
+async function bigTz() { const t = (await cfg("VELOMNA_BIG_DREAM_TZ")).trim(); try { new Intl.DateTimeFormat("en-CA", { timeZone: t }); return t || "America/Toronto"; } catch (_) { return "America/Toronto"; } }
+function localParts(d: Date, tz: string) {
+  const f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+  const p: Record<string, string> = {}; for (const x of f.formatToParts(d)) p[x.type] = x.value;
+  return { date: `${p.year}-${p.month}-${p.day}`, y: Number(p.year), m: Number(p.month), d: Number(p.day), hour: Number(p.hour) % 24, minute: Number(p.minute) };
+}
+// the UTC instant of <local date> <hour>:00 in tz, found by correcting a UTC guess with the zone's offset at that guess (twice, for DST edges)
+function zonedToUtc(y: number, m: number, d: number, hour: number, tz: string): Date {
+  const wall = Date.UTC(y, m - 1, d, hour, 0, 0); // the wanted wall-clock time, read as if it were UTC
+  let guess = wall;
+  for (let i = 0; i < 2; i++) { const lp = localParts(new Date(guess), tz); const asIf = Date.UTC(lp.y, lp.m - 1, lp.d, lp.hour, lp.minute, 0); guess = wall - (asIf - guess); }
+  return new Date(guess);
+}
+async function nextBigAt(now = new Date()): Promise<{ at: Date; hour: number; tz: string }> {
+  const hour = await bigHour(), tz = await bigTz();
+  const lp = localParts(now, tz);
+  let at = zonedToUtc(lp.y, lp.m, lp.d, hour, tz);
+  if (at.getTime() <= now.getTime() - BIG_WINDOW_MIN * 60e3) { const t = new Date(now.getTime() + 24 * 3600e3); const lt = localParts(t, tz); at = zonedToUtc(lt.y, lt.m, lt.d, hour, tz); }
+  return { at, hour, tz };
+}
+async function bigDreamDueNow(matrixId: string, now = new Date()): Promise<boolean> {
+  const hour = await bigHour(), tz = await bigTz();
+  const lp = localParts(now, tz);
+  if (lp.hour !== hour || lp.minute >= BIG_WINDOW_MIN) return false;
+  const { data: last } = await admin.from("velomna_nights").select("started_at").eq("matrix_id", matrixId).eq("kind", "big").order("started_at", { ascending: false }).limit(1).maybeSingle();
+  if (last && localParts(new Date(last.started_at), tz).date === lp.date) return false; // today's Big Dream already opened
+  return true;
+}
+
+// ───────────── the painter: a Big Dream gets a picture of its own (Cloudinary Image Generation API, keys in zo_config) ─────────────
+async function painterArmed(): Promise<string> {
+  const key = await cfg("CLOUDINARY_API_KEY"), secret = await cfg("CLOUDINARY_API_SECRET"), cloud = await cfg("CLOUDINARY_CLOUD_NAME");
+  if (!cloud) return "no CLOUDINARY_CLOUD_NAME in zo_config";
+  if (!key || !secret) return "no CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET in zo_config";
+  return "armed";
+}
+async function paintNight(nightNo: number, manifest: string, geometry: string): Promise<{ picture_id?: string; error?: string }> {
+  const armed = await painterArmed(); if (armed !== "armed") return { error: armed };
+  const key = await cfg("CLOUDINARY_API_KEY"), secret = await cfg("CLOUDINARY_API_SECRET"), cloud = await cfg("CLOUDINARY_CLOUD_NAME");
+  const prompt = `A dream scene: ${manifest.replace(/\s+/g, " ").slice(0, 700)} Setting: ${geometry.replace(/_/g, " ")}. Cinematic painterly photoreal, volumetric light, no people's faces, no text, no watermark, wide shot.`;
+  try {
+    const r = await fetch(`https://api.cloudinary.com/v2/generate/${cloud}/text_to_image`, {
+      method: "POST", headers: { authorization: "Basic " + btoa(`${key}:${secret}`), "content-type": "application/json" },
+      body: JSON.stringify({ prompt, format: "jpeg", image_size: { aspect_ratio: "16:9", resolution: "2K" }, model: { mode: "auto", preference: "economy" }, target: { target_type: "managed_asset", public_id: `velomna/night/${nightNo}` } }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { error: `cloudinary ${r.status}: ${JSON.stringify(j).slice(0, 160)}` };
+    const pid = j?.data?.assets?.[0]?.storage?.public_id; if (!pid) return { error: "cloudinary answered without a public_id" };
+    return { picture_id: String(pid) };
+  } catch (e) { return { error: "cloudinary unreachable: " + String(e).slice(0, 120) }; }
 }
 
 // ───────────── the night (dream-work) ─────────────
@@ -372,6 +464,9 @@ async function runNight(force = false) {
   if (!b.ok) return { skipped: `budget: $${isNaN(b.spent) ? "?" : b.spent.toFixed(2)} of $${b.cap} spent in 24h; the night waits` };
   const m = await openMatrix();
   const cur = await currentNight(m.id);
+  // the Big Dream opens at its hour whether or not anyone is here: it is the one appointment the world keeps
+  const big = await bigDreamDueNow(m.id);
+  if (big) force = true;
   if (!force && cur && (await idle(m.id))) return { skipped: "idle: no human dreamed or acted in the last 6 hours; the world sleeps" };
   if (cur && cur.status === "open") {
     const age = (Date.now() - new Date(cur.started_at).getTime()) / 60e3;
@@ -387,7 +482,8 @@ async function runNight(force = false) {
     .in("source", ["dream", "day", "machine"]).order("created_at", { ascending: false }).limit(30);
   const { data: echoes } = await admin.from("velomna_seeds").select("id, text, source, dreamer_id").eq("matrix_id", m.id).eq("source", "echo").limit(60);
   const shuffled = (echoes ?? []).sort(() => Math.random() - 0.5);
-  const pool = [...(fresh ?? []), ...shuffled.slice(0, Math.max(0, 10 - (fresh?.length ?? 0)))];
+  const want = big ? BIG_POOL : 10;
+  const pool = [...(fresh ?? []), ...shuffled.slice(0, Math.max(0, want - (fresh?.length ?? 0)))];
   if (pool.length < 3) return { skipped: "fewer than three seeds; the world cannot condense" };
   const sys = `You are the Censor of a dream-work engine. You receive SEEDS: fragments of real dreams and days from several dreamers, and machine dreams. Build ONE dream scene by Freud's four steps: CONDENSE several seeds into each figure (never one seed = one figure); DISPLACE the feelings onto other objects; REPRESENT ideas as concrete pictures; REVISE into a coherent scene. Rules: never quote a seed verbatim; never include names, places, dates or anything that could identify a person; every figure must be made from at least 3 seeds when 3 are available; 2 to 4 figures. The scene's geometry is one of: ${GEOMETRIES.join(", ")}. place_label is "observed_physics" for event_horizon_interior, lensed_sky, deep_ocean, mars_dusk, inside_a_neuron; "hypothesis" for wormhole_throat, branching_street, backward_hour; "ordinary" otherwise. Choose geometry from the seeds' feeling, not at random; ordinary scenes are common. Output strict JSON only:
 {"scene":{"geometry":"...","place_label":"...","law_bent":{"law":"...","degree":0.0},"palette":{"emotion":"...","light":"..."},"impossible_detail":"...","manifest":"120-180 words, second person, present tense, what the dreamer sees on arrival; no names"},
@@ -410,8 +506,14 @@ async function runNight(force = false) {
   const usedIds = (fresh ?? []).map((s) => s.id);
   if (usedIds.length) await admin.from("velomna_seeds").update({ used_in_night: nextNo }).in("id", usedIds);
   const ei = Number(out.emotion_index ?? 0);
-  await admin.from("velomna_nights").insert({ matrix_id: m.id, night: nextNo, emotion_index: isFinite(ei) ? ei : null, big_dream: Math.abs(ei) >= 0.85 });
-  return { night: nextNo, geometry: g.geometry, figures: (out.figures ?? []).length, seeds_used: usedIds.length, echoes_used: pool.length - usedIds.length };
+  await admin.from("velomna_nights").insert({ matrix_id: m.id, night: nextNo, kind: big ? "big" : "night", emotion_index: isFinite(ei) ? ei : null, big_dream: big || Math.abs(ei) >= 0.85 });
+  // the Big Dream is painted from its own manifest; a regular night wears the per-place still. Failure is loud in the result, never fatal.
+  let painted: { picture_id?: string; error?: string } = {};
+  if (big) {
+    painted = await paintNight(nextNo, String(g.manifest ?? ""), String(g.geometry));
+    if (painted.picture_id) await admin.from("velomna_scenes").update({ picture_id: painted.picture_id }).eq("id", scene.id);
+  }
+  return { night: nextNo, kind: big ? "big" : "night", geometry: g.geometry, figures: (out.figures ?? []).length, seeds_used: usedIds.length, echoes_used: pool.length - usedIds.length, picture: painted.picture_id ?? null, picture_error: painted.error ?? null };
 }
 
 // ───────────── agents play through the same door ─────────────
@@ -450,8 +552,9 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\/velomna-api/, "").replace(/\/$/, "") || "/";
   try {
-    if (path === "/health") { const b = await budgetLeft(); return json({ ok: true, product: SLUG, at: new Date().toISOString(), paused: await paused(), spent_24h_usd: isNaN(b.spent) ? null : Math.round(b.spent * 1000) / 1000, daily_cap_usd: b.cap }); }
+    if (path === "/health") { const b = await budgetLeft(); const nb = await nextBigAt(); return json({ ok: true, product: SLUG, at: new Date().toISOString(), paused: await paused(), spent_24h_usd: isNaN(b.spent) ? null : Math.round(b.spent * 1000) / 1000, daily_cap_usd: b.cap, big_dream: { next_at: nb.at.toISOString(), hour_local: nb.hour, tz: nb.tz, painter: await painterArmed() } }); }
     if (path === "/pulse") return json(await pulse());
+    if (path === "/board") return json(await board());
     if (path.startsWith("/night") || path === "/agents/tick") {
       const secret = await cfg("VELOMNA_CRON_SECRET");
       if (!secret || req.headers.get("x-velomna-cron") !== secret) return json({ error: "refused" }, 401);
