@@ -159,7 +159,7 @@ async function observe(d: Dreamer) {
   };
 }
 
-async function seed(d: Dreamer, text: string, source: string) {
+async function seed(d: Dreamer, text: string, source: string, lag: unknown = null) {
   text = (text ?? "").trim().slice(0, 2400);
   if (text.split(/\s+/).length < 4) return json({ error: "a seed needs at least four words" }, 400);
   const night = await currentNight(d.matrix_id);
@@ -168,7 +168,9 @@ async function seed(d: Dreamer, text: string, source: string) {
   if ((count ?? 0) >= SEEDS_PER_NIGHT) return json({ error: `three seeds a night is the limit` }, 429);
   const emb = await embed(text);
   const { data, error } = await admin.from("velomna_seeds")
-    .insert({ dreamer_id: d.id, matrix_id: d.matrix_id, night: n, source: source === "day" ? "day" : (d.kind === "agent" ? "machine" : "dream"), text, embedding: emb })
+    .insert({ dreamer_id: d.id, matrix_id: d.matrix_id, night: n, source: source === "day" ? "day" : (d.kind === "agent" ? "machine" : "dream"), text, embedding: emb,
+      // dream-lag: the dreamer's own answer to "did part of this come from last night's world?" (null = not asked)
+      codes: lag === null || lag === undefined ? null : { lag: lag === true } })
     .select("id, created_at").single();
   if (error) throw error;
   // a seed that lands while last night's world is already cut: tell the dreamer when the next night opens
@@ -405,7 +407,7 @@ Deno.serve(async (req) => {
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     if (path === "/observe") return json(await observe(d));
     if (path === "/me") return json(await me(d));
-    if (path === "/seed" && req.method === "POST") return await seed(d, body.text, body.source);
+    if (path === "/seed" && req.method === "POST") return await seed(d, body.text, body.source, "lag" in body ? body.lag : null);
     if (path === "/act" && req.method === "POST") return await act(d, body.verb, body.figure ?? null, body.text);
     if (path === "/read" && req.method === "POST") return await read(d, body.figure, body.text);
     if (path === "/awake" && req.method === "POST") return await awake(d, body.action);
