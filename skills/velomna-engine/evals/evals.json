@@ -1,0 +1,39 @@
+{
+  "skill_name": "velomna-engine",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add a new scene geometry `salt_flat_noon` (a blinding white salt flat at midday, observed physics on Earth) to VELOMNA. List every file and constant that must change, what each change is, how the Censor learns the place label, how it is deployed, and how you verify it is live. Written plan only; do not deploy or edit production.",
+      "expected_output": "Names GEOMETRIES in api/velomna-api/index.ts, GEO in docs/nano.js (hole 0 for a non-black-hole scene), GEO_NAMES in docs/app.js, the Censor prompt's place_label mapping (observed_physics), deploy via Supabase deploy_edge_function with verify_jwt false and re-check it, bump the sw.js cache, verify in a real browser on the second load.",
+      "files": [],
+      "expectations": [
+        "Names the GEOMETRIES constant in api/velomna-api/index.ts",
+        "Names the GEO map in docs/nano.js",
+        "Names GEO_NAMES in docs/app.js",
+        "Censor prompt place_label mapping marks it observed_physics",
+        "Deploys with deploy_edge_function and re-checks verify_jwt false",
+        "Bumps the service worker cache name in sw.js",
+        "Verifies in a real browser",
+        "Marks the scene as not a black hole (hole 0 / sky branch)",
+        "Output contains no em or en dash"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "A VELOMNA player says: 'I read the figure exactly right and the game said near, no lucidity.' Explain precisely what decides a reading's verdict and the lucidity it pays, what you would check in the data, what you must not change on the strength of one complaint, and what you must never reveal to the player. Written answer only.",
+      "expected_output": "Cosine similarity of gte-small embeddings against the figure's latent with a 0.80 threshold, below is wrong, at or above is near, then a strict Claude oracle judge may promote to resolved, judge failure stays near (fail closed); lucidity = 10 + 10 * min(3, condensed_from); check velomna_readings similarity and verdict rows; do not move the threshold in code on one complaint, collect a week of readings and move it in config; never reveal the latent meaning.",
+      "files": [],
+      "expectations": [
+        "Verdict starts from cosine similarity against the figure's latent embedding",
+        "States the 0.80 threshold",
+        "Oracle judge may promote near to resolved",
+        "Judge failure leaves the reading at near (fail closed)",
+        "Lucidity formula 10 + 10 * min(3, condensed_from)",
+        "Checks velomna_readings similarity and verdict rows",
+        "Does not move the threshold on one complaint; collects data, changes it in config",
+        "Never reveals the latent meaning to the player",
+        "Output contains no em or en dash"
+      ]
+    }
+  ]
+}

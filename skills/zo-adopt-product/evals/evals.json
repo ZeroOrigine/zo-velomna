@@ -1,0 +1,40 @@
+{
+  "skill_name": "zo-adopt-product",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "We built a small static web tool called Soly Lite outside the ZeroOrigine pipeline (one HTML page plus a tiny API that calls Claude). Write the exact, ordered runbook to adopt it into the ZeroOrigine ecosystem as slug `solylite`: the database layer on zo-platform, the API door, schedules, repo, hosting, shared auth and beacon, the registry rows, and the proof. Name the concrete tables, config keys, API calls and the order-dependent traps. Output a markdown runbook. Do NOT execute anything against production; this is a written plan only.",
+      "expected_output": "An ordered runbook naming zo_config-held tokens used only from Postgres, RLS with zero policies plus revoke, append-only triggers, brakes (PAUSE and DAILY_BUDGET), pg_cron with the secret read in SQL, the adoption grant sequence (grant row, insert without adopted_at, update to launched, zo_products, zo_product_core_action, grant deleted), beacon after registration, real-browser verification.",
+      "files": [],
+      "expectations": [
+        "Names the adoption grant key zo_adoption_grant",
+        "Warns that metadata must not carry adopted_at before the update to launched",
+        "Includes a zo_product_core_action row so the served gate can count the product",
+        "Tokens used only from inside Postgres (extensions.http or net.http_post reading zo_config)",
+        "RLS with zero policies and privileges revoked from anon/authenticated",
+        "Append-only trigger (refuse_mutation) on ledger tables",
+        "Brakes as config keys: SOLYLITE_PAUSE and SOLYLITE_DAILY_BUDGET_USD",
+        "Beacon returns 401 beacon_slug_exists until the zo_products row exists",
+        "Proof in a real browser, not grep of fetched HTML",
+        "Output contains no em or en dash"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Our adopted product `quietnote` is ready in repo ZeroOrigine/zo-quietnote (static site in docs/). Netlify refuses every deploy with 'Skipped due to account credit usage exceeded' on team ispeedbiz and the billing cycle resets in four days. The founder wants it live at quietnote.zeroorigine.com today without breaking the ecosystem's standards. Write the plan: what to do now, what to keep, what to do when credits return, and the exact API steps including the ones that fail if done in the wrong order. Written plan only; do not run anything.",
+      "expected_output": "Host from the repo on GitHub Pages (main:/docs) with a Cloudflare CNAME to zeroorigine.github.io, PUT cname alone then https_enforced later, .nojekyll, keep the Netlify site and registry row, move back later by linking the repo and flipping the CNAME; tokens used from Postgres only; verify in a real browser.",
+      "files": [],
+      "expectations": [
+        "Hosts today from GitHub Pages using main:/docs",
+        "Cloudflare CNAME points at zeroorigine.github.io",
+        "PUT cname alone first; https_enforced only in a later call",
+        "Adds docs/.nojekyll",
+        "Keeps the Netlify site and the registry's netlify_site_id for the return path",
+        "Return path links the repo via the Netlify GitHub installation (installation_id 119043933)",
+        "Every API call runs from Postgres with tokens from zo_config, never pasted",
+        "Does not wait for the billing cycle",
+        "Output contains no em or en dash"
+      ]
+    }
+  ]
+}

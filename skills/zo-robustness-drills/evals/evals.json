@@ -1,0 +1,40 @@
+{
+  "skill_name": "zo-robustness-drills",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "We just deployed a Supabase Edge Function `quietnote-api` on zo-platform. It has an append-only table `quietnote_entries` (trigger quietnote_refuse_mutation), reads a pause flag QUIETNOTE_PAUSE and a daily budget QUIETNOTE_DAILY_BUDGET_USD from zo_config (60 second cache), and a cron route guarded by header x-quietnote-cron compared to zo_config QUIETNOTE_CRON_SECRET. Write the complete drill plan to prove it is robust: every drill, what you attempt, the expected result, how each drill avoids a false pass, and the report format. Written plan only; do not run anything against production.",
+      "expected_output": "A drill catalogue with ok/fail/unknown verdicts, unknown never counted as ok, append-only drills that insert a row first inside a rolled-back transaction, both-direction auth drills (401 and 200), pause drill that waits out the 60 s cache, budget drill fail-closed with cost ledger unchanged, secrets read in SQL never pasted, teardown with residue count, a report format listing each drill with evidence.",
+      "files": [],
+      "expectations": [
+        "Uses three verdicts: ok, fail, unknown",
+        "States that unknown is never recorded as ok",
+        "Append-only drill inserts a row before attempting UPDATE/DELETE",
+        "Database drills run inside a transaction that rolls back",
+        "Cron secret drilled in both directions: wrong header 401 and right header 200",
+        "Pause drill waits out the 60 second config cache",
+        "Budget drill is fail-closed and asserts zo_cost_logs gained no row",
+        "Secret is read in SQL, never pasted into the transcript",
+        "Teardown ends with a residue count of zero",
+        "Output contains no em or en dash"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "A teammate reports: 'I ran UPDATE velomna_resolutions SET night = 99 and it said UPDATE 0 with no error, so the append-only trigger is broken.' The table currently has zero rows. Write exactly how you verify or refute this claim against production safely, what result would prove the trigger works, what you record, and what you change in the drill so this misfire does not recur. Written answer only; do not run anything.",
+      "expected_output": "Identifies the vacuous pass (empty table, row-level trigger never fires on zero rows), prescribes inserting a drill row inside a transaction, attempting the UPDATE, asserting it raises, rolling back, checking the trigger inventory, recording the result as a false alarm with the reason, and amending the drill to insert a row first.",
+      "files": [],
+      "expectations": [
+        "Explains the vacuous result: a row-level trigger fires per row, zero rows means it never ran",
+        "Classifies UPDATE 0 as unknown, not as a failure",
+        "Inserts a drill row then attempts the UPDATE",
+        "Rolls back so production keeps zero rows",
+        "Proof is the refuse trigger raising an exception",
+        "Checks the trigger inventory (pg_trigger / tgenabled)",
+        "Records the outcome as a false alarm with its reason",
+        "Amends the drill so it inserts a row first from now on",
+        "Output contains no em or en dash"
+      ]
+    }
+  ]
+}
