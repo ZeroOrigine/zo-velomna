@@ -8,7 +8,9 @@ const SLUG = 'velomna';
 const sb = createClient(SUPABASE_URL, ANON, { auth: { flowType: 'pkce', detectSessionInUrl: true, persistSession: true } });
 
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// the display gate: nothing reaches the page with an em or en dash, whatever the ledger holds (law since night 1)
+const nodash = (s) => String(s ?? '').replace(/\s*[\u2014\u2013]\s*/g, ', ');
+const esc = (s) => nodash(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const GEO_NAMES = { ordinary_room: 'an ordinary room', non_euclidean_house: 'a house with more rooms than walls', event_horizon_interior: 'inside the horizon', lensed_sky: 'a lensed sky', wormhole_throat: 'a wormhole throat', branching_street: 'a street that branches into itself', backward_hour: 'an hour running backward', deep_ocean: 'the deep ocean', mars_dusk: 'dusk on Mars', inside_a_neuron: 'inside a neuron' };
 const PLACE = { observed_physics: ['Observed physics', ''], hypothesis: ['Hypothesis, consistent', 'hyp'], ordinary: ['Ordinary', 'ord'] };
 
@@ -72,8 +74,8 @@ async function loadNight() {
   $('nightEyebrow').textContent = 'night ' + night.night + (night.big_dream ? ' · a big dream' : '');
   $('nightTitle').textContent = GEO_NAMES[g.geometry] ? GEO_NAMES[g.geometry].replace(/^(a|an|the) /, (m) => m[0].toUpperCase() + m.slice(1)) : 'The night';
   $('nightStatus').innerHTML = `<span class="chip ${pl[1]}">${pl[0]}</span><span>you are <b>${esc(night.me.presence)}</b></span><span>lucidity <b>${night.me.lucidity}</b></span><span>${night.me.actions_left} actions left</span><span>${night.status === 'open' ? timeLeft(night.started_at) : 'cut'}</span>`;
-  $('sceneText').textContent = night.scene.manifest;
-  $('sceneDetail').textContent = g.impossible_detail ? 'one impossible detail: ' + g.impossible_detail : '';
+  $('sceneText').textContent = nodash(night.scene.manifest);
+  $('sceneDetail').textContent = g.impossible_detail ? 'one impossible detail: ' + nodash(g.impossible_detail) : '';
   if (window.nano?.ok) window.nano.set({ geometry: g.geometry, emotion: g.palette?.emotion });
   renderFigures(); renderFeed();
 }
@@ -110,7 +112,7 @@ function renderFigures() {
     btn.disabled = false;
   }));
 }
-function log(text, cls) { const d = document.createElement('div'); d.className = 'log ' + cls; d.textContent = text; $('log').prepend(d); }
+function log(text, cls) { const d = document.createElement('div'); d.className = 'log ' + cls; d.textContent = nodash(text); $('log').prepend(d); }
 function renderFeed() {
   const items = night.feed || [];
   $('feed').innerHTML = items.length ? items.map((a) => `<li><span class="who">${esc(a.presence)}<button class="ask" data-id="${a.id}" title="20 lucidity">are you awake?</button></span><span>${esc(a.displaced_text)}</span></li>`).join('') : '<li class="note">No one has moved yet tonight. You could be first.</li>';
