@@ -1,5 +1,3 @@
-# Move this file to .github/workflows/desktop.yml (remote tools may not write under .github).
-# VELOMNA desktop (Windows + macOS): a Tauri 2 shell around the live portal. Manual trigger only.
 # Unsigned builds until Apple/Windows certificates are added as repository secrets.
 name: desktop
 on:
