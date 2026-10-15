@@ -1,4 +1,4 @@
-// VELOMNA · the one door. Adopted, founder-built, 2026-10-15.
+// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v4: brakes (pause + daily budget).
 // Humans (Supabase JWT) and agents (x-velomna-agent-key) get byte-identical responses.
 // Nothing below this door ever returns a latent. Costs are ledgered in zo_cost_logs.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -24,15 +24,29 @@ const json = (b: unknown, s = 200) =>
   new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "content-type": "application/json" } });
 
 // ───────────── config + model ─────────────
-const cfgCache: Record<string, string> = {};
+const cfgCache: Record<string, { v: string; at: number }> = {};
 async function cfg(k: string): Promise<string> {
-  if (cfgCache[k] !== undefined) return cfgCache[k];
+  const hit = cfgCache[k];
+  if (hit && Date.now() - hit.at < 60_000) return hit.v; // a pause or a budget change lands within a minute
   const { data } = await admin.from("zo_config").select("value").eq("key", k).maybeSingle();
-  cfgCache[k] = (data?.value as string) ?? "";
-  return cfgCache[k];
+  cfgCache[k] = { v: (data?.value as string) ?? "", at: Date.now() };
+  return cfgCache[k].v;
+}
+// THE BRAKES. A pause stops the engine and the paid verbs within a minute; a daily budget caps spend fail-closed.
+async function paused(): Promise<boolean> { return ["true", "1", "yes", "on"].includes((await cfg("VELOMNA_PAUSE")).trim().toLowerCase()); }
+async function budgetLeft(): Promise<{ ok: boolean; spent: number; cap: number }> {
+  const cap = Number(await cfg("VELOMNA_DAILY_BUDGET_USD")) || 5;
+  const since = new Date(Date.now() - 24 * 3600e3).toISOString();
+  const { data, error } = await admin.from("zo_cost_logs").select("cost_usd").eq("product_slug", SLUG).gte("timestamp", since);
+  if (error) return { ok: false, spent: NaN, cap }; // unreadable ledger = no permission to spend (Rule 14)
+  const spent = (data ?? []).reduce((s, r) => s + Number(r.cost_usd ?? 0), 0);
+  return { ok: spent < cap, spent, cap };
 }
 
 async function claude(mind: string, system: string, user: string, maxTokens = 700): Promise<string> {
+  if (await paused()) throw new Error("paused: VELOMNA_PAUSE is on");
+  const b = await budgetLeft();
+  if (!b.ok) throw new Error(`budget: $${isNaN(b.spent) ? "?" : b.spent.toFixed(2)} of $${b.cap} spent in 24h; refusing to spend more`);
   const key = await cfg("ANTHROPIC_API_KEY");
   if (!key) throw new Error("ANTHROPIC_API_KEY missing in zo_config");
   const model = (await cfg("product_runtime_model")) || "claude-haiku-4-5-20251001";
@@ -315,6 +329,9 @@ async function machineDream(agent: Dreamer, lastNight: number | null) {
   await admin.from("velomna_seeds").insert({ dreamer_id: agent.id, matrix_id: agent.matrix_id, night: lastNight, source: "machine", text: text.trim().slice(0, 1200), embedding: await embed(text) });
 }
 async function runNight(force = false) {
+  if (await paused()) return { skipped: "paused: VELOMNA_PAUSE is on" };
+  const b = await budgetLeft();
+  if (!b.ok) return { skipped: `budget: $${isNaN(b.spent) ? "?" : b.spent.toFixed(2)} of $${b.cap} spent in 24h; the night waits` };
   const m = await openMatrix();
   const cur = await currentNight(m.id);
   if (!force && cur && (await idle(m.id))) return { skipped: "idle: no human dreamed or acted in the last 6 hours; the world sleeps" };
@@ -361,6 +378,8 @@ async function runNight(force = false) {
 
 // ───────────── agents play through the same door ─────────────
 async function agentsTick(force = false) {
+  if (await paused()) return { skipped: "paused: VELOMNA_PAUSE is on" };
+  if (!(await budgetLeft()).ok) return { skipped: "budget: daily cap reached; agents rest" };
   const m = await openMatrix();
   const night = await currentNight(m.id);
   if (!night || night.status !== "open") return { skipped: "no open night" };
@@ -393,7 +412,7 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\/velomna-api/, "").replace(/\/$/, "") || "/";
   try {
-    if (path === "/health") return json({ ok: true, product: SLUG, at: new Date().toISOString() });
+    if (path === "/health") { const b = await budgetLeft(); return json({ ok: true, product: SLUG, at: new Date().toISOString(), paused: await paused(), spent_24h_usd: isNaN(b.spent) ? null : Math.round(b.spent * 1000) / 1000, daily_cap_usd: b.cap }); }
     if (path === "/pulse") return json(await pulse());
     if (path.startsWith("/night") || path === "/agents/tick") {
       const secret = await cfg("VELOMNA_CRON_SECRET");
@@ -408,6 +427,7 @@ Deno.serve(async (req) => {
     if (path === "/observe") return json(await observe(d));
     if (path === "/me") return json(await me(d));
     if (path === "/seed" && req.method === "POST") return await seed(d, body.text, body.source, "lag" in body ? body.lag : null);
+    if ((path === "/act" || path === "/read") && (await paused())) return json({ error: "the world is paused by its keeper; seeds are still kept" }, 503);
     if (path === "/act" && req.method === "POST") return await act(d, body.verb, body.figure ?? null, body.text);
     if (path === "/read" && req.method === "POST") return await read(d, body.figure, body.text);
     if (path === "/awake" && req.method === "POST") return await awake(d, body.action);
