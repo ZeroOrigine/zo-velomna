@@ -1,4 +1,4 @@
-// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v4: brakes (pause + daily budget).
+// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v5: spendGate + D10 drill route.
 // Humans (Supabase JWT) and agents (x-velomna-agent-key) get byte-identical responses.
 // Nothing below this door ever returns a latent. Costs are ledgered in zo_cost_logs.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -34,19 +34,26 @@ async function cfg(k: string): Promise<string> {
 }
 // THE BRAKES. A pause stops the engine and the paid verbs within a minute; a daily budget caps spend fail-closed.
 async function paused(): Promise<boolean> { return ["true", "1", "yes", "on"].includes((await cfg("VELOMNA_PAUSE")).trim().toLowerCase()); }
-async function budgetLeft(): Promise<{ ok: boolean; spent: number; cap: number }> {
+// ledger: the table the budget reads. The D10 drill passes a table that does not exist so the error branch runs for real.
+async function budgetLeft(ledger = "zo_cost_logs"): Promise<{ ok: boolean; spent: number; cap: number; error?: string }> {
   const cap = Number(await cfg("VELOMNA_DAILY_BUDGET_USD")) || 5;
   const since = new Date(Date.now() - 24 * 3600e3).toISOString();
-  const { data, error } = await admin.from("zo_cost_logs").select("cost_usd").eq("product_slug", SLUG).gte("timestamp", since);
-  if (error) return { ok: false, spent: NaN, cap }; // unreadable ledger = no permission to spend (Rule 14)
+  const { data, error } = await admin.from(ledger).select("cost_usd").eq("product_slug", SLUG).gte("timestamp", since);
+  if (error) return { ok: false, spent: NaN, cap, error: String(error.message ?? error).slice(0, 120) }; // unreadable ledger = no permission to spend (Rule 14)
   const spent = (data ?? []).reduce((s, r) => s + Number(r.cost_usd ?? 0), 0);
   return { ok: spent < cap, spent, cap };
 }
+// ONE gate in front of every model call. claude() and the D10 drill share it, so the drill proves the path the money takes.
+async function spendGate(ledger = "zo_cost_logs"): Promise<{ allowed: boolean; reason: string }> {
+  if (await paused()) return { allowed: false, reason: "paused: VELOMNA_PAUSE is on" };
+  const b = await budgetLeft(ledger);
+  if (!b.ok) return { allowed: false, reason: `budget: $${isNaN(b.spent) ? "?" : b.spent.toFixed(2)} of $${b.cap} spent in 24h; refusing to spend more${b.error ? ` (ledger unreadable: ${b.error})` : ""}` };
+  return { allowed: true, reason: `$${b.spent.toFixed(4)} of $${b.cap} spent in 24h` };
+}
 
 async function claude(mind: string, system: string, user: string, maxTokens = 700): Promise<string> {
-  if (await paused()) throw new Error("paused: VELOMNA_PAUSE is on");
-  const b = await budgetLeft();
-  if (!b.ok) throw new Error(`budget: $${isNaN(b.spent) ? "?" : b.spent.toFixed(2)} of $${b.cap} spent in 24h; refusing to spend more`);
+  const gate = await spendGate();
+  if (!gate.allowed) throw new Error(gate.reason);
   const key = await cfg("ANTHROPIC_API_KEY");
   if (!key) throw new Error("ANTHROPIC_API_KEY missing in zo_config");
   const model = (await cfg("product_runtime_model")) || "claude-haiku-4-5-20251001";
@@ -420,6 +427,16 @@ Deno.serve(async (req) => {
       if (path === "/night/run") return json(await runNight(url.searchParams.get("force") === "1"));
       if (path === "/agents/tick") return json(await agentsTick(url.searchParams.get("force") === "1"));
       return json({ error: "not found" }, 404);
+    }
+    // D10, the budget-unreadable drill: run the real spend gate against a ledger that does not exist and report its verdict.
+    // Cron-secret guarded. Writes nothing. A gate that answers "allowed" here would spend blind during a real ledger outage.
+    if (path === "/drill/budget-unreadable") {
+      const secret = await cfg("VELOMNA_CRON_SECRET");
+      if (!secret || req.headers.get("x-velomna-cron") !== secret) return json({ error: "refused" }, 401);
+      const broken = await spendGate("zo_cost_logs_drill_missing");
+      const healthy = await spendGate();
+      const verdict = broken.allowed === false && /unreadable/.test(broken.reason) ? "ok" : "fail";
+      return json({ drill: "D10 budget unreadable", verdict, broken_ledger: broken, real_ledger: healthy, at: new Date().toISOString() });
     }
     const d = await dreamerFromReq(req);
     if (!d) return json({ error: "sign in (magic link) or send x-velomna-agent-key" }, 401);

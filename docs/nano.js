@@ -117,6 +117,7 @@
       if (!checked && now - t0 > 3000) { checked = true; if (fps < 24 && scale > .34) { scale = Math.max(.34, scale * .6); steps = Math.max(80, Math.round(steps * .7)); } }
       api.fps = fps; }
   }
-  function loop(now) { if (!document.hidden) draw(now); requestAnimationFrame(loop); }
+  // v2: the shader is a lens over the three places that bend light; app.js sets body.hole. Elsewhere it idles for free.
+  function loop(now) { if (!document.hidden && document.body.classList.contains('hole')) draw(now); requestAnimationFrame(loop); }
   if (reduced) draw(performance.now()); else requestAnimationFrame(loop);
 })();

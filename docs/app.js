@@ -1,4 +1,4 @@
-// VELOMNA web portal. Vanilla ES module. The API is the one door; this file only asks and shows.
+// VELOMNA web portal v2. Vanilla ES module. The API is the one door; this file only asks and shows.
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/+esm';
 
 const SUPABASE_URL = 'https://opgitcuqwicuiplaptkm.supabase.co';
@@ -11,10 +11,31 @@ const $ = (id) => document.getElementById(id);
 // the display gate: nothing reaches the page with an em or en dash, whatever the ledger holds (law since night 1)
 const nodash = (s) => String(s ?? '').replace(/\s*[\u2014\u2013]\s*/g, ', ');
 const esc = (s) => nodash(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const GEO_NAMES = { ordinary_room: 'an ordinary room', non_euclidean_house: 'a house with more rooms than walls', event_horizon_interior: 'inside the horizon', lensed_sky: 'a lensed sky', wormhole_throat: 'a wormhole throat', branching_street: 'a street that branches into itself', backward_hour: 'an hour running backward', deep_ocean: 'the deep ocean', mars_dusk: 'dusk on Mars', inside_a_neuron: 'inside a neuron' };
-const PLACE = { observed_physics: ['Observed physics', ''], hypothesis: ['Hypothesis, consistent', 'hyp'], ordinary: ['Ordinary', 'ord'] };
 
-let toastT; function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('open'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('open'), 4200); }
+// ─── the ten places: one genome, three renderers (Nano shader, the painted still, the label) ───
+const GEO_NAMES = { ordinary_room: 'an ordinary room', non_euclidean_house: 'a house with more rooms than walls', event_horizon_interior: 'inside the horizon', lensed_sky: 'a lensed sky', wormhole_throat: 'a wormhole throat', branching_street: 'a street that branches into itself', backward_hour: 'an hour running backward', deep_ocean: 'the deep ocean', mars_dusk: 'dusk on Mars', inside_a_neuron: 'inside a neuron' };
+const GEO_LABEL = { ordinary_room: 'ordinary', non_euclidean_house: 'ordinary', event_horizon_interior: 'observed_physics', lensed_sky: 'observed_physics', wormhole_throat: 'hypothesis', branching_street: 'hypothesis', backward_hour: 'hypothesis', deep_ocean: 'observed_physics', mars_dusk: 'observed_physics', inside_a_neuron: 'observed_physics' };
+const GEO_ORDER = ['non_euclidean_house', 'lensed_sky', 'ordinary_room', 'event_horizon_interior', 'wormhole_throat', 'branching_street', 'backward_hour', 'deep_ocean', 'mars_dusk', 'inside_a_neuron'];
+const HOLES = new Set(['event_horizon_interior', 'lensed_sky', 'wormhole_throat']);
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const PLACE = { observed_physics: ['Observed physics', ''], hypothesis: ['Hypothesis, consistent', 'hyp'], ordinary: ['Ordinary', 'ord'] };
+// the stills live on Cloudinary (generated once on 2026-10-15, never from seeds); f_auto picks AVIF/WebP, q_auto picks the bytes
+const CDN = 'https://res.cloudinary.com/doemifuxr/image/upload';
+const pic = (geo, w = 1600) => `${CDN}/f_auto,q_auto:good,c_fill,ar_16:9,w_${w}/velomna/geo/${GEO_NAMES[geo] ? geo : 'ordinary_room'}.jpg`;
+const srcset = (geo) => [800, 1200, 1600, 2048].map((w) => `${pic(geo, w)} ${w}w`).join(', ');
+function setPic(img, geo, sizes = '100vw') {
+  if (!img) return;
+  img.classList.remove('in');
+  img.sizes = sizes; img.srcset = srcset(geo); img.src = pic(geo, 1600);
+  const show = () => img.classList.add('in');
+  if (img.complete && img.naturalWidth) show(); else img.addEventListener('load', show, { once: true });
+}
+function setWorld(geo, emotion) {
+  document.body.classList.toggle('hole', HOLES.has(geo));
+  if (window.nano?.ok) window.nano.set({ geometry: geo || 'lensed_sky', emotion: emotion || 'awe' });
+}
+
+let toastT; function toast(msg) { const t = $('toast'); t.textContent = nodash(msg); t.classList.add('open'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('open'), 4200); }
 function beacon(path) { try { fetch(SUPABASE_URL + '/rest/v1/zo_product_metrics', { method: 'POST', headers: { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ product_slug: SLUG, event: 'page_view', path: path.slice(0, 120), is_probe: false, source: 'browser' }), keepalive: true }).catch(() => {}); } catch (e) {} }
 
 async function token() { const { data } = await sb.auth.getSession(); return data?.session?.access_token || null; }
@@ -26,6 +47,10 @@ async function api(path, body) {
   return j;
 }
 
+// ─── reveal on scroll (no library) ───
+const io = 'IntersectionObserver' in window ? new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { rootMargin: '0px 0px -8% 0px' }) : null;
+function arm() { document.querySelectorAll('.reveal:not(.in)').forEach((el) => io ? io.observe(el) : el.classList.add('in')); }
+
 // ─── routing ───
 const VIEWS = ['home', 'night', 'morning', 'agents', 'law'];
 function route() {
@@ -34,54 +59,73 @@ function route() {
   VIEWS.forEach((x) => $('v-' + x).classList.toggle('open', x === v));
   document.querySelectorAll('nav a').forEach((a) => { if (a.dataset.nav === v) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   beacon('/' + (v === 'home' ? '' : v));
+  // static bands carry their own still
+  document.querySelectorAll('#v-' + v + ' img[data-geo]').forEach((img) => { if (!img.src) setPic(img, img.dataset.geo, img.closest('.step') ? '(max-width:640px) 100vw, 33vw' : '100vw'); });
   if (v === 'home') loadPulse();
   if (v === 'night') loadNight();
-  if (v === 'morning') loadMorning();
-  if (v === 'agents') loadAgents();
+  if (v === 'morning') { loadMorning(); setWorld('backward_hour', 'warmth'); }
+  if (v === 'agents') setWorld('inside_a_neuron', 'awe');
+  if (v === 'law') setWorld('ordinary_room', 'calm');
+  arm();
   window.scrollTo({ top: 0 });
 }
 addEventListener('hashchange', route);
 
 // ─── landing ───
+function renderPlaces(nowGeo) {
+  const grid = $('placesGrid'); if (!grid) return;
+  if (!grid.childElementCount) {
+    grid.innerHTML = GEO_ORDER.map((g) => { const pl = PLACE[GEO_LABEL[g]]; return `<a class="place" data-geo="${g}" href="#/night" aria-label="${esc(GEO_NAMES[g])}"><img alt="" loading="lazy" decoding="async"><div class="cap"><div class="name">${esc(cap(GEO_NAMES[g]))}</div><span class="chip ${pl[1]}">${pl[0]}</span></div></a>`; }).join('');
+    grid.querySelectorAll('.place').forEach((a) => setPic(a.querySelector('img'), a.dataset.geo, '(max-width:640px) 100vw, (max-width:1000px) 50vw, 33vw'));
+    arm();
+  }
+  grid.querySelectorAll('.place').forEach((a) => a.classList.toggle('now', a.dataset.geo === nowGeo));
+}
 async function loadPulse() {
+  renderPlaces(null);
+  if (!$('heroImg').src) setPic($('heroImg'), 'non_euclidean_house');
   try {
     const p = await fetch(API + '/pulse').then((r) => r.json());
-    const geo = GEO_NAMES[p.geometry] || 'forming';
-    $('pulse').innerHTML = `<span>night <b>${p.night}</b></span><span>${esc(geo)}</span><span><b>${p.dreamers.humans}</b> humans, <b>${p.dreamers.agents}</b> agents</span><span><b>${p.figures_resolved}</b> figures resolved</span><span><b>${p.seeds_dreamed}</b> seeds dreamed</span>`;
-    if (window.nano?.ok) window.nano.set({ geometry: p.geometry || 'lensed_sky', emotion: 'awe' });
-  } catch (e) { $('pulse').innerHTML = '<span>the pulse is out of reach right now</span>'; }
+    const geo = p.geometry || 'non_euclidean_house';
+    const name = GEO_NAMES[geo] || 'a place still forming';
+    setPic($('heroImg'), geo); setWorld(geo, 'awe'); renderPlaces(geo);
+    $('heroEyebrow').textContent = p.night ? `Night ${p.night} · ${p.status === 'open' ? 'open now' : 'between nights'} · ${PLACE[p.place_label]?.[0] || 'ordinary'}` : 'The first night has not opened';
+    $('heroTitle').innerHTML = p.night ? `Tonight the world dreams <em>${esc(name)}</em>.` : 'A world made from <em>real dreams</em>.';
+    $('pulse').innerHTML = `<span><b>${p.dreamers.humans}</b> humans</span><span><b>${p.dreamers.agents}</b> agents</span><span><b>${p.figures_resolved}</b> figures resolved</span><span><b>${p.seeds_dreamed}</b> seeds dreamed</span><span>night <b>${p.night}</b></span>`;
+    $('nHumans').textContent = p.dreamers.humans; $('nAgents').textContent = p.dreamers.agents;
+  } catch (e) { setPic($('heroImg'), 'non_euclidean_house'); $('pulse').innerHTML = '<span>the pulse is out of reach right now</span>'; }
 }
-$('enter').addEventListener('submit', async (ev) => {
+document.querySelectorAll('form.door#enter, form.door#enter2').forEach((f) => f.addEventListener('submit', async (ev) => {
   ev.preventDefault();
-  const email = $('email').value.trim(); if (!email) return;
-  const btn = ev.target.querySelector('button'); btn.disabled = true;
+  const email = f.querySelector('input[type=email]').value.trim(); if (!email) return;
+  const btn = f.querySelector('button'); btn.disabled = true;
   const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + '/#/night' } });
   btn.disabled = false;
   if (error) { toast('The door did not send: ' + error.message); return; }
   toast('Sent. Open the link from this device; it lands you in tonight\'s world.');
-});
+}));
 
 // ─── night ───
 let night = null;
 function timeLeft(startedAt) { const end = new Date(startedAt).getTime() + 90 * 60e3; const m = Math.max(0, Math.round((end - Date.now()) / 60e3)); return m + ' min to the cut'; }
 async function loadNight() {
-  if (!(await token())) { $('nightTitle').textContent = 'Sign in to enter.'; $('nightStatus').innerHTML = '<a class="link" href="#/">send me the door</a>'; $('sceneText').textContent = ''; return; }
+  if (!(await token())) { $('nightTitle').textContent = 'Sign in to enter.'; $('nightStatus').innerHTML = '<a class="link" href="#/">send me the door</a>'; $('sceneText').textContent = ''; setPic($('nightImg'), 'ordinary_room'); return; }
   $('nightTitle').textContent = 'The night is forming.';
-  try { night = await api('/observe'); } catch (e) { $('nightTitle').textContent = 'The door did not open.'; $('sceneText').textContent = e.message; return; }
-  if (!night.scene) { $('nightTitle').textContent = night.message || 'The night is forming.'; $('sceneText').textContent = 'Leave a seed below. The next night opens on the cycle.'; $('figures').innerHTML = ''; $('feed').innerHTML = ''; return; }
+  try { night = await api('/observe'); } catch (e) { $('nightTitle').textContent = 'The door did not open.'; $('sceneText').textContent = nodash(e.message); return; }
+  if (!night.scene) { $('nightTitle').textContent = nodash(night.message || 'The night is forming.'); $('sceneText').textContent = 'Leave a seed below. The next night opens on the cycle.'; $('figures').innerHTML = ''; $('feed').innerHTML = ''; setPic($('nightImg'), 'ordinary_room'); return; }
   const g = night.scene.genome || {};
   const pl = PLACE[g.place_label] || PLACE.ordinary;
-  $('nightEyebrow').textContent = 'night ' + night.night + (night.big_dream ? ' · a big dream' : '');
-  $('nightTitle').textContent = GEO_NAMES[g.geometry] ? GEO_NAMES[g.geometry].replace(/^(a|an|the) /, (m) => m[0].toUpperCase() + m.slice(1)) : 'The night';
-  $('nightStatus').innerHTML = `<span class="chip ${pl[1]}">${pl[0]}</span><span>you are <b>${esc(night.me.presence)}</b></span><span>lucidity <b>${night.me.lucidity}</b></span><span>${night.me.actions_left} actions left</span><span>${night.status === 'open' ? timeLeft(night.started_at) : 'cut'}</span>`;
+  $('nightEyebrow').innerHTML = `<span class="live"></span><span>night ${night.night}${night.big_dream ? ' · a big dream' : ''} · ${pl[0]}</span>`;
+  $('nightTitle').textContent = GEO_NAMES[g.geometry] ? cap(GEO_NAMES[g.geometry]) : 'The night';
+  $('nightStatus').innerHTML = `<span>you are <b>${esc(night.me.presence)}</b></span><span>lucidity <b>${night.me.lucidity}</b></span><span><b>${night.me.actions_left}</b> actions left</span><span>${night.status === 'open' ? timeLeft(night.started_at) : 'cut'}</span>`;
   $('sceneText').textContent = nodash(night.scene.manifest);
   $('sceneDetail').textContent = g.impossible_detail ? 'one impossible detail: ' + nodash(g.impossible_detail) : '';
-  if (window.nano?.ok) window.nano.set({ geometry: g.geometry, emotion: g.palette?.emotion });
+  setPic($('nightImg'), g.geometry); setWorld(g.geometry, g.palette?.emotion);
   renderFigures(); renderFeed();
 }
 function renderFigures() {
   $('figures').innerHTML = night.figures.map((f) => `
-    <div class="figure" data-id="${f.id}">
+    <div class="figure${f.resolved_by_me ? ' done' : ''}" data-id="${f.id}">
       <div class="text">${esc(f.manifest)}</div>
       <div class="note">made from ${f.condensed_from} seeds · readings used ${f.readings_used} of 5${f.resolved_by_me ? ' · <span style="color:var(--good)">resolved by you</span>' : ''}</div>
       <div class="actions">
@@ -134,7 +178,7 @@ $('dayBack').addEventListener('click', () => { $('day').classList.remove('open')
 // ─── morning ───
 async function loadMorning() {
   if (!(await token())) { $('constellation').innerHTML = '<a class="link" href="#/">send me the door</a> to plant a seed'; return; }
-  try { const m = await api('/me'); $('constellation').textContent = m.constellation.length ? `${m.constellation.length} figures resolved · ${m.seeds} seeds planted · lucidity ${m.lucidity}` : 'No figure resolved yet. Tonight is a good night.'; } catch (e) { $('constellation').textContent = e.message; }
+  try { const m = await api('/me'); $('constellation').textContent = m.constellation.length ? `${m.constellation.length} figures resolved · ${m.seeds} seeds planted · lucidity ${m.lucidity}` : 'No figure resolved yet. Tonight is a good night.'; } catch (e) { $('constellation').textContent = nodash(e.message); }
 }
 $('morningForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -146,7 +190,6 @@ $('morningForm').addEventListener('submit', async (ev) => {
 });
 
 // ─── agents ───
-async function loadAgents() {}
 $('agentForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   if (!(await token())) { toast('Sign in first: send yourself the door from the home page.'); return; }
