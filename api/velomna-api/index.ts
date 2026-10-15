@@ -1,4 +1,4 @@
-// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v5: spendGate + D10 drill route.
+// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v6: guests read before they sign in; readings allowed on a cut night; guest row becomes the human on first sign-in.
 // Humans (Supabase JWT) and agents (x-velomna-agent-key) get byte-identical responses.
 // Nothing below this door ever returns a latent. Costs are ledgered in zo_cost_logs.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -11,13 +11,14 @@ const SLUG = "velomna";
 const ACTIONS_PER_NIGHT = 40;
 const READINGS_PER_FIGURE = 5;
 const SEEDS_PER_NIGHT = 3;
+const GUEST_READINGS_PER_NIGHT = 3; // a visitor can read three figures a night before the door
 const NIGHT_MINUTES = 90;
 const IDLE_HOURS = 6;
 const COST_IN = 1.0 / 1e6, COST_OUT = 5.0 / 1e6; // haiku-class, USD per token
 
 const CORS = {
   "access-control-allow-origin": "*",
-  "access-control-allow-headers": "authorization, content-type, x-velomna-agent-key, x-velomna-cron, apikey",
+  "access-control-allow-headers": "authorization, content-type, x-velomna-agent-key, x-velomna-guest, x-velomna-cron, apikey",
   "access-control-allow-methods": "GET, POST, OPTIONS",
 };
 const json = (b: unknown, s = 200) =>
@@ -99,6 +100,9 @@ async function openMatrix() {
   if (!data) throw new Error("no open matrix");
   return data;
 }
+// a guest is keyed by a secret the browser made and holds; the hash lives in agent_key_hash under kind 'guest'
+const guestHash = (k: string) => sha256("guest:" + k);
+function guestKeyOf(req: Request): string | null { const g = (req.headers.get("x-velomna-guest") ?? "").trim(); return /^[A-Za-z0-9-]{16,64}$/.test(g) ? g : null; }
 async function dreamerFromReq(req: Request): Promise<Dreamer | null> {
   const agentKey = req.headers.get("x-velomna-agent-key");
   if (agentKey) {
@@ -108,12 +112,32 @@ async function dreamerFromReq(req: Request): Promise<Dreamer | null> {
   }
   const auth = req.headers.get("authorization") ?? "";
   const jwt = auth.replace(/^Bearer\s+/i, "");
-  if (!jwt) return null;
+  const guestKey = guestKeyOf(req);
+  if (!jwt) {
+    if (!guestKey) return null;
+    const h = await guestHash(guestKey);
+    const { data: g } = await admin.from("velomna_dreamers").select("*").eq("agent_key_hash", h).eq("kind", "guest").maybeSingle();
+    if (g) { await admin.from("velomna_dreamers").update({ last_seen: new Date().toISOString() }).eq("id", g.id); return g as Dreamer; }
+    const m = await openMatrix();
+    const { data: ng, error } = await admin.from("velomna_dreamers")
+      .insert({ kind: "guest", matrix_id: m.id, agent_key_hash: h, last_seen: new Date().toISOString() }).select("*").single();
+    if (error) throw error;
+    return ng as Dreamer;
+  }
   const { data: u } = await admin.auth.getUser(jwt);
   if (!u?.user) return null;
   const { data: d } = await admin.from("velomna_dreamers").select("*").eq("user_id", u.user.id).maybeSingle();
   if (d) { await admin.from("velomna_dreamers").update({ last_seen: new Date().toISOString() }).eq("id", d.id); return d as Dreamer; }
   const m = await openMatrix();
+  // first sign-in: if this browser played as a guest, that guest row BECOMES the human, so its lucidity and readings come along
+  if (guestKey) {
+    const h = await guestHash(guestKey);
+    const { data: g } = await admin.from("velomna_dreamers").select("id").eq("agent_key_hash", h).eq("kind", "guest").maybeSingle();
+    if (g) {
+      const { data: up, error } = await admin.from("velomna_dreamers").update({ kind: "human", user_id: u.user.id, agent_key_hash: null, last_seen: new Date().toISOString() }).eq("id", g.id).select("*").single();
+      if (!error && up) { await admin.from("zo_product_metrics").insert({ product_slug: SLUG, event: "signup", path: "/night", source: "server" }); return up as Dreamer; }
+    }
+  }
   const { data: nd, error } = await admin.from("velomna_dreamers")
     .insert({ user_id: u.user.id, kind: "human", matrix_id: m.id, last_seen: new Date().toISOString() }).select("*").single();
   if (error) throw error;
@@ -176,8 +200,13 @@ async function observe(d: Dreamer) {
       readings_used: (mine ?? []).filter((r) => r.figure_id === f.id).length,
     })),
     feed: feed ?? [],
-    me: { presence: await presenceOf(d.id, night.night), lucidity: await balance(d.id), actions_left: Math.max(0, ACTIONS_PER_NIGHT - used) },
+    me: { kind: d.kind, presence: await presenceOf(d.id, night.night), lucidity: await balance(d.id), actions_left: d.kind === "guest" ? 0 : Math.max(0, ACTIONS_PER_NIGHT - used),
+      readings_left: d.kind === "guest" ? Math.max(0, GUEST_READINGS_PER_NIGHT - (await guestReadingsTonight(d.id, scene.id))) : null },
   };
+}
+async function guestReadingsTonight(dreamerId: string, sceneId: string) {
+  const { count } = await admin.from("velomna_readings").select("id", { count: "exact", head: true }).eq("dreamer_id", dreamerId).eq("scene_id", sceneId);
+  return count ?? 0;
 }
 
 async function seed(d: Dreamer, text: string, source: string, lag: unknown = null) {
@@ -230,9 +259,11 @@ const WARMS = ["Something in the scene leans toward you. Not yet.", "The figure 
 
 async function read(d: Dreamer, figureId: string, sentence: string) {
   const night = await currentNight(d.matrix_id);
-  if (!night || night.status !== "open") return json({ error: "no night is open" }, 409);
+  if (!night) return json({ error: "the world has not dreamed yet" }, 409);
   const scene = await sceneOf(d.matrix_id, night.night);
   if (!scene) return json({ error: "the night is forming" }, 409);
+  // a cut night can still be read: the scene stops changing, the figures keep their meaning until the next night replaces them
+  if (d.kind === "guest" && (await guestReadingsTonight(d.id, scene.id)) >= GUEST_READINGS_PER_NIGHT) return json({ error: "three readings a night before the door; sign in for five per figure, forty actions and your own seeds" }, 429);
   sentence = (sentence ?? "").trim().slice(0, 300);
   if (sentence.split(/\s+/).length < 3) return json({ error: "a reading is one sentence of at least three words" }, 400);
   const { data: fig } = await admin.from("velomna_figures").select("id, manifest, condensed_from").eq("id", figureId).eq("scene_id", scene.id).maybeSingle();
@@ -323,7 +354,7 @@ async function idle(matrixId: string) {
   const since = new Date(Date.now() - IDLE_HOURS * 3600e3).toISOString();
   const { count: s } = await admin.from("velomna_seeds").select("id", { count: "exact", head: true }).eq("matrix_id", matrixId).in("source", ["dream", "day"]).gte("created_at", since);
   if ((s ?? 0) > 0) return false;
-  const { data: humans } = await admin.from("velomna_dreamers").select("id").eq("matrix_id", matrixId).eq("kind", "human").gte("last_seen", since);
+  const { data: humans } = await admin.from("velomna_dreamers").select("id").eq("matrix_id", matrixId).in("kind", ["human", "guest"]).gte("last_seen", since);
   return (humans ?? []).length === 0;
 }
 async function machineDream(agent: Dreamer, lastNight: number | null) {
@@ -439,8 +470,9 @@ Deno.serve(async (req) => {
       return json({ drill: "D10 budget unreadable", verdict, broken_ledger: broken, real_ledger: healthy, at: new Date().toISOString() });
     }
     const d = await dreamerFromReq(req);
-    if (!d) return json({ error: "sign in (magic link) or send x-velomna-agent-key" }, 401);
+    if (!d) return json({ error: "sign in (magic link), send x-velomna-agent-key, or x-velomna-guest to read as a visitor" }, 401);
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    if (d.kind === "guest" && ["/act", "/seed", "/awake", "/agents/register"].includes(path)) return json({ error: "sign in for that: a visitor can look and read; acting, planting a seed and asking who is awake need the door", guest: true }, 403);
     if (path === "/observe") return json(await observe(d));
     if (path === "/me") return json(await me(d));
     if (path === "/seed" && req.method === "POST") return await seed(d, body.text, body.source, "lag" in body ? body.lag : null);

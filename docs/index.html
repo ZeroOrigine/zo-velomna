@@ -79,6 +79,26 @@ button.primary:hover{background:var(--accent-2);transform:translateY(-1px)}
 button[disabled]{opacity:.5;cursor:default;transform:none}
 .small{padding:7px 12px;font-size:12px}
 
+.cta{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:26px}
+.btn{display:inline-flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:13px;letter-spacing:.04em;text-decoration:none;color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:12px 20px;transition:transform .2s,background .2s,border-color .2s}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#1a1208;font-weight:500}
+.btn.primary:hover{background:var(--accent-2);transform:translateY(-1px)}
+.btn.big{font-size:15px;padding:16px 28px}
+form.door.compact{margin-top:14px;max-width:30rem}
+form.door.compact input{padding:11px 14px;font-size:15px}
+.coach{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px;margin:0 0 26px;border:1px solid rgba(232,163,90,.45);border-radius:16px;padding:16px;background:rgba(232,163,90,.06);position:relative}
+.coach .c{display:grid;gap:4px}
+.coach .n{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;color:var(--accent)}
+.coach .h{font-size:1.05rem;font-weight:400}
+.coach p{font-size:14px;color:var(--ink-2);margin:0}
+.coach .x{position:absolute;top:8px;right:10px;background:none;border:0;color:var(--ink-3);padding:4px 8px;font-size:12px;backdrop-filter:none}
+.coach .x:hover{color:var(--ink)}
+.progress{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:18px 0 6px}
+.glyphs{font-family:var(--font-mono);font-size:22px;letter-spacing:.18em;color:var(--ink-3)}
+.glyphs b{color:var(--good);font-weight:400}.glyphs i{color:var(--accent);font-style:normal}
+.nextup{border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin-top:40px;display:grid;gap:8px;background:rgba(236,230,216,.025)}
+.nextup .n{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+.nextup p{margin:0;font-size:15.5px}
 /* pulse strip */
 .pulse{display:flex;flex-wrap:wrap;gap:8px 22px;font-family:var(--font-mono);font-size:12px;color:var(--ink-2);margin:24px 0 0;font-variant-numeric:tabular-nums}
 .pulse b{color:var(--ink);font-weight:500;font-size:14px}
@@ -196,9 +216,12 @@ footer a{color:var(--ink-2);text-decoration:none}
         <div class="eyebrow"><span class="live"></span><span id="heroEyebrow">Tonight the world dreams</span></div>
         <h1 id="heroTitle">A world made from <em>real dreams</em>.</h1>
         <p class="lead">Leave one dream, or one true thing from your day. The night folds it into other people's seeds until nobody can tell whose it was. Then everyone walks through what came back.</p>
-        <form class="door" id="enter">
-          <div class="row"><input type="email" id="email" placeholder="your email" autocomplete="email" required><button class="primary" type="submit">Send me the door</button></div>
-          <p class="note">One link, no password, no app to install. Free. Adults only.</p>
+        <div class="cta">
+          <a class="btn primary big" href="#/night" id="enterNow">Enter tonight's dream</a>
+          <span class="note">No sign-in. Read three figures as a visitor. Takes two minutes.</span>
+        </div>
+        <form class="door compact" id="enter">
+          <div class="row"><input type="email" id="email" placeholder="your email, to keep what you earn" autocomplete="email" required><button type="submit">Send me the door</button></div>
         </form>
         <div class="pulse" id="pulse"><span>reading the pulse</span></div>
       </div>
@@ -267,6 +290,13 @@ footer a{color:var(--ink-2);text-decoration:none}
       </div>
     </div>
     <div class="wrap body">
+      <div class="coach" id="coach" hidden>
+        <button class="x" id="coachX" aria-label="dismiss">dismiss</button>
+        <div class="c"><div class="n">1 · LOOK</div><div class="h">Read the scene</div><p>This is what the night built from everyone's seeds. Nobody's words appear as typed.</p></div>
+        <div class="c"><div class="n">2 · READ</div><div class="h">Say what a figure really is</div><p>Pick a figure below, press read, write one sentence. The oracle answers: wrong, near, or resolved.</p></div>
+        <div class="c"><div class="n">3 · KEEP</div><div class="h">Resolve one and it stays yours</div><p>Lucidity is earned only this way. Sign in to act inside the dream and plant your own seed for tomorrow.</p></div>
+      </div>
+      <div class="progress" id="progress"></div>
       <p class="scene" id="sceneText"></p>
       <p class="faint mono" id="sceneDetail"></p>
       <div id="log"></div>
@@ -276,6 +306,15 @@ footer a{color:var(--ink-2);text-decoration:none}
       <h2 style="margin-top:44px">Presences</h2>
       <p class="note">Other dreamers, as the world shows them. Ask one whether it is awake for 20 Lucidity; it must answer: human, agent, or echo.</p>
       <ul class="feed" id="feed"></ul>
+      <div id="guestDoor" hidden>
+        <h2 style="margin-top:44px">Keep what you earned</h2>
+        <p class="lead">Sign in with one link and this visitor becomes you: your Lucidity and readings come along. Then you can act inside the dream, ask who is awake, and plant your own seed for tomorrow.</p>
+        <form class="door" id="enter3">
+          <div class="row"><input type="email" placeholder="your email" autocomplete="email" required><button class="primary" type="submit">Send me the door</button></div>
+          <p class="note">One link, no password. Free. Adults only.</p>
+        </form>
+      </div>
+      <div id="humanOnly">
       <h2 style="margin-top:44px">Leave a seed for tomorrow</h2>
       <form class="door" id="seedForm">
         <textarea id="seedText" placeholder="A dream you remember, or one true thing from today. Four words or more. Nobody will read these words."></textarea>
@@ -286,6 +325,8 @@ footer a{color:var(--ink-2);text-decoration:none}
         </div>
         <p class="note" id="seedNote">Three seeds a night. Seeds enter the next night, condensed with at least two others.</p>
       </form>
+      </div>
+      <div class="nextup" id="nextup"></div>
     </div>
   </section>
 

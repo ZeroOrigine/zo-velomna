@@ -1,4 +1,4 @@
-// VELOMNA web portal v2. Vanilla ES module. The API is the one door; this file only asks and shows.
+// VELOMNA web portal v3: a visitor can read tonight's dream before the door. Vanilla ES module. The API is the one door; this file only asks and shows.
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/+esm';
 
 const SUPABASE_URL = 'https://opgitcuqwicuiplaptkm.supabase.co';
@@ -39,9 +39,13 @@ let toastT; function toast(msg) { const t = $('toast'); t.textContent = nodash(m
 function beacon(path) { try { fetch(SUPABASE_URL + '/rest/v1/zo_product_metrics', { method: 'POST', headers: { apikey: ANON, Authorization: 'Bearer ' + ANON, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify({ product_slug: SLUG, event: 'page_view', path: path.slice(0, 120), is_probe: false, source: 'browser' }), keepalive: true }).catch(() => {}); } catch (e) {} }
 
 async function token() { const { data } = await sb.auth.getSession(); return data?.session?.access_token || null; }
+// the visitor's key: made here, held here, hashed on the server. On first sign-in the server turns this visitor into the human.
+const guestKey = (() => { try { let k = localStorage.getItem('velomna_guest'); if (!/^[A-Za-z0-9-]{16,64}$/.test(k || '')) { k = (crypto.randomUUID ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, '0')).join('')); localStorage.setItem('velomna_guest', k); } return k; } catch (e) { return null; } })();
+const seen = (k) => { try { return localStorage.getItem(k) === '1'; } catch (e) { return false; } };
+const mark = (k) => { try { localStorage.setItem(k, '1'); } catch (e) {} };
 async function api(path, body) {
   const t = await token();
-  const r = await fetch(API + path, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json', ...(t ? { authorization: 'Bearer ' + t } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const r = await fetch(API + path, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json', ...(t ? { authorization: 'Bearer ' + t } : {}), ...(guestKey ? { 'x-velomna-guest': guestKey } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const j = await r.json().catch(() => ({ error: 'no answer' }));
   if (!r.ok) throw new Error(j.error || ('error ' + r.status));
   return j;
@@ -95,7 +99,7 @@ async function loadPulse() {
     $('nHumans').textContent = p.dreamers.humans; $('nAgents').textContent = p.dreamers.agents;
   } catch (e) { setPic($('heroImg'), 'non_euclidean_house'); $('pulse').innerHTML = '<span>the pulse is out of reach right now</span>'; }
 }
-document.querySelectorAll('form.door#enter, form.door#enter2').forEach((f) => f.addEventListener('submit', async (ev) => {
+document.querySelectorAll('form.door#enter, form.door#enter2, form.door#enter3').forEach((f) => f.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const email = f.querySelector('input[type=email]').value.trim(); if (!email) return;
   const btn = f.querySelector('button'); btn.disabled = true;
@@ -108,20 +112,42 @@ document.querySelectorAll('form.door#enter, form.door#enter2').forEach((f) => f.
 // ─── night ───
 let night = null;
 function timeLeft(startedAt) { const end = new Date(startedAt).getTime() + 90 * 60e3; const m = Math.max(0, Math.round((end - Date.now()) / 60e3)); return m + ' min to the cut'; }
+let guest = false;
 async function loadNight() {
-  if (!(await token())) { $('nightTitle').textContent = 'Sign in to enter.'; $('nightStatus').innerHTML = '<a class="link" href="#/">send me the door</a>'; $('sceneText').textContent = ''; setPic($('nightImg'), 'ordinary_room'); return; }
   $('nightTitle').textContent = 'The night is forming.';
-  try { night = await api('/observe'); } catch (e) { $('nightTitle').textContent = 'The door did not open.'; $('sceneText').textContent = nodash(e.message); return; }
-  if (!night.scene) { $('nightTitle').textContent = nodash(night.message || 'The night is forming.'); $('sceneText').textContent = 'Leave a seed below. The next night opens on the cycle.'; $('figures').innerHTML = ''; $('feed').innerHTML = ''; setPic($('nightImg'), 'ordinary_room'); return; }
+  try { night = await api('/observe'); } catch (e) { $('nightTitle').textContent = 'The door did not open.'; $('sceneText').textContent = nodash(e.message); setPic($('nightImg'), 'ordinary_room'); return; }
+  guest = night.me?.kind === 'guest';
+  $('guestDoor').hidden = !guest; $('humanOnly').hidden = guest;
+  $('coach').hidden = seen('velomna_coach_seen');
+  if (!night.scene) { $('nightTitle').textContent = nodash(night.message || 'The night is forming.'); $('sceneText').textContent = guest ? 'The first night opens on the cycle. Sign in and leave a seed to wake it.' : 'Leave a seed below. The next night opens on the cycle.'; $('figures').innerHTML = ''; $('feed').innerHTML = ''; $('progress').innerHTML = ''; $('nextup').innerHTML = ''; setPic($('nightImg'), 'ordinary_room'); return; }
   const g = night.scene.genome || {};
   const pl = PLACE[g.place_label] || PLACE.ordinary;
-  $('nightEyebrow').innerHTML = `<span class="live"></span><span>night ${night.night}${night.big_dream ? ' · a big dream' : ''} · ${pl[0]}</span>`;
+  $('nightEyebrow').innerHTML = `<span class="live"></span><span>night ${night.night}${night.big_dream ? ' · a big dream' : ''} · ${pl[0]}${guest ? ' · visiting' : ''}</span>`;
   $('nightTitle').textContent = GEO_NAMES[g.geometry] ? cap(GEO_NAMES[g.geometry]) : 'The night';
-  $('nightStatus').innerHTML = `<span>you are <b>${esc(night.me.presence)}</b></span><span>lucidity <b>${night.me.lucidity}</b></span><span><b>${night.me.actions_left}</b> actions left</span><span>${night.status === 'open' ? timeLeft(night.started_at) : 'cut'}</span>`;
+  const open = night.status === 'open';
+  $('nightStatus').innerHTML = `<span>you are <b>${esc(night.me.presence)}</b></span><span>lucidity <b>${night.me.lucidity}</b></span>${guest ? `<span><b>${night.me.readings_left}</b> readings left as a visitor</span>` : `<span><b>${night.me.actions_left}</b> actions left</span>`}<span>${open ? timeLeft(night.started_at) : 'cut · readings still open'}</span>`;
   $('sceneText').textContent = nodash(night.scene.manifest);
   $('sceneDetail').textContent = g.impossible_detail ? 'one impossible detail: ' + nodash(g.impossible_detail) : '';
   setPic($('nightImg'), g.geometry); setWorld(g.geometry, g.palette?.emotion);
-  renderFigures(); renderFeed();
+  renderProgress(); renderFigures(); renderFeed(); renderNextUp(open);
+}
+function glyphs() { return night.figures.map((f) => f.resolved_by_me ? '<b>\u25c6</b>' : (f.readings_used ? '<i>\u25c7</i>' : '\u00b7')).join(''); }
+function renderProgress() {
+  const done = night.figures.filter((f) => f.resolved_by_me).length;
+  $('progress').innerHTML = `<span class="glyphs" title="resolved, read, unread">${glyphs()}</span><span class="note"><b>${done}</b> of ${night.figures.length} figures resolved by you tonight</span><button class="small" id="shareBtn">share tonight</button>`;
+  $('shareBtn').addEventListener('click', async () => {
+    const name = GEO_NAMES[night.scene.genome?.geometry] || 'a place still forming';
+    const text = `VELOMNA night ${night.night}: ${name}. I resolved ${done} of ${night.figures.length} figures ${night.figures.map((f) => f.resolved_by_me ? '\u25c6' : (f.readings_used ? '\u25c7' : '\u00b7')).join('')}\nA world made from real dreams. Yours goes in tomorrow night.\nhttps://velomna.zeroorigine.com`;
+    try { if (navigator.share) { await navigator.share({ text }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+    try { await navigator.clipboard.writeText(text); toast('Copied. Paste it anywhere.'); } catch (e) { toast(text); }
+  });
+}
+function renderNextUp(open) {
+  const cut = night.started_at ? new Date(new Date(night.started_at).getTime() + 90 * 60e3) : null;
+  const when = cut ? cut.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  $('nextup').innerHTML = guest
+    ? `<div class="n">What next</div><p>Read up to three figures tonight. Resolve one and your Lucidity waits here. Sign in above and this visitor becomes you; then act inside the dream and plant your own seed. Tomorrow night the world is rebuilt from everyone's seeds, yours included.</p>`
+    : `<div class="n">What next</div><p>${open ? `Tonight: act on figures, read them, ask who is awake. The night cuts at ${when}; readings stay open after.` : 'This night is cut. Readings stay open until the next one replaces it.'} Before you sleep: plant a seed below. In the morning: write what came back at <a class="link" href="#/morning">morning</a>. Every night the world is rebuilt from what everyone planted, yours included.</p>`;
 }
 function renderFigures() {
   $('figures').innerHTML = night.figures.map((f) => `
@@ -129,7 +155,7 @@ function renderFigures() {
       <div class="text">${esc(f.manifest)}</div>
       <div class="note">made from ${f.condensed_from} seeds · readings used ${f.readings_used} of 5${f.resolved_by_me ? ' · <span style="color:var(--good)">resolved by you</span>' : ''}</div>
       <div class="actions">
-        <button class="small" data-act="act">act</button>
+        <button class="small" data-act="act" ${guest ? 'disabled title="sign in to act inside the dream"' : ''}>act</button>
         <button class="small" data-act="read" ${f.resolved_by_me ? 'disabled' : ''}>read</button>
       </div>
       <form class="inline" data-mode="act"><input type="text" maxlength="400" placeholder="what you do to it (10 to 60 words)"><button class="primary small" type="submit">do it</button></form>
@@ -147,7 +173,7 @@ function renderFigures() {
       if (f.dataset.mode === 'act') { const r = await api('/act', { verb: 'do', figure: id, text }); log(r.displaced, ''); }
       else {
         const r = await api('/read', { figure: id, text });
-        if (r.verdict === 'resolved') { log(r.line + ' +' + r.lucidity_delta + ' lucidity. ' + (r.origin ? 'Origin: ' + r.origin : ''), 'good'); }
+        if (r.verdict === 'resolved') { log(r.line + ' +' + r.lucidity_delta + ' lucidity. ' + (r.origin ? 'Origin: ' + r.origin : '') + (guest ? ' Sign in below and it stays yours.' : ''), 'good'); mark('velomna_coach_seen'); }
         else log(r.line, r.verdict === 'near' ? '' : 'wrong');
       }
       f.querySelector('input').value = ''; f.classList.remove('open');
@@ -173,6 +199,7 @@ $('seedForm').addEventListener('submit', async (ev) => {
   btn.disabled = false;
 });
 $('daylight').addEventListener('click', () => { $('day').classList.add('open'); });
+$('coachX').addEventListener('click', () => { mark('velomna_coach_seen'); $('coach').hidden = true; });
 $('dayBack').addEventListener('click', () => { $('day').classList.remove('open'); });
 
 // ─── morning ───
