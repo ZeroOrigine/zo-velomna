@@ -1,4 +1,4 @@
-// VELOMNA web portal v4: the Big Dream clock, the board, and a night's own picture when it has one. Vanilla ES module. The API is the one door; this file only asks and shows.
+// VELOMNA web portal v5 (read by click, act by click, writing optional and worth double): the Big Dream clock, the board, and a night's own picture when it has one. Vanilla ES module. The API is the one door; this file only asks and shows.
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/+esm';
 
 const SUPABASE_URL = 'https://opgitcuqwicuiplaptkm.supabase.co';
@@ -178,13 +178,13 @@ async function loadNight() {
   setPic($('nightImg'), g.geometry, '100vw', painted ? night.scene.picture : null); setWorld(g.geometry, g.palette?.emotion);
   renderProgress(); renderFigures(); renderFeed(); renderNextUp(open);
 }
-function glyphs() { return night.figures.map((f) => f.resolved_by_me ? '<b>\u25c6</b>' : (f.readings_used ? '<i>\u25c7</i>' : '\u00b7')).join(''); }
+function glyphs() { return night.figures.map((f) => f.resolved_by_me ? '<b>\u25c6</b>' : ((f.readings_used || f.chosen) ? '<i>\u25c7</i>' : '\u00b7')).join(''); }
 function renderProgress() {
   const done = night.figures.filter((f) => f.resolved_by_me).length;
   $('progress').innerHTML = `<span class="glyphs" title="resolved, read, unread">${glyphs()}</span><span class="note"><b>${done}</b> of ${night.figures.length} figures resolved by you tonight</span><button class="small" id="shareBtn">share tonight</button>`;
   $('shareBtn').addEventListener('click', async () => {
     const name = GEO_NAMES[night.scene.genome?.geometry] || 'a place still forming';
-    const text = `VELOMNA night ${night.night}${night.scene.kind === 'big' ? ', the Big Dream' : ''}: ${name}. I resolved ${done} of ${night.figures.length} figures ${night.figures.map((f) => f.resolved_by_me ? '\u25c6' : (f.readings_used ? '\u25c7' : '\u00b7')).join('')}\nA world made from real dreams. Yours goes in tomorrow night.\nhttps://velomna.zeroorigine.com`;
+    const text = `VELOMNA night ${night.night}${night.scene.kind === 'big' ? ', the Big Dream' : ''}: ${name}. I resolved ${done} of ${night.figures.length} figures ${night.figures.map((f) => f.resolved_by_me ? '\u25c6' : ((f.readings_used || f.chosen) ? '\u25c7' : '\u00b7')).join('')}\nA world made from real dreams. Yours goes in tomorrow night.\nhttps://velomna.zeroorigine.com`;
     try { if (navigator.share) { await navigator.share({ text }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
     try { await navigator.clipboard.writeText(text); toast('Copied. Paste it anywhere.'); } catch (e) { toast(text); }
   });
@@ -197,18 +197,46 @@ function renderNextUp(open) {
     : `<div class="n">What next</div><p>${open ? `Tonight: act on figures, read them, ask who is awake. The night cuts at ${when}; readings stay open after.` : 'This night is cut. Readings stay open until the next one replaces it.'} Before you sleep: plant a seed below. In the morning: write what came back at <a class="link" href="#/morning">morning</a>. Every night the world is rebuilt from what everyone planted, yours included.</p>`;
 }
 function renderFigures() {
-  $('figures').innerHTML = night.figures.map((f) => `
+  $('figures').innerHTML = night.figures.map((f) => {
+    const used = f.chosen || f.readings_used > 0;
+    const choices = Array.isArray(f.choices) && f.choices.length ? f.choices : null;
+    const pickedWrong = f.chosen && f.chosen.verdict !== 'resolved';
+    return `
     <div class="figure${f.resolved_by_me ? ' done' : ''}" data-id="${f.id}">
       <div class="text">${esc(f.manifest)}</div>
-      <div class="note">made from ${f.condensed_from} seeds · readings used ${f.readings_used} of 5${f.resolved_by_me ? ' · <span style="color:var(--good)">resolved by you</span>' : ''}</div>
+      <div class="note">made from ${f.condensed_from} seeds${f.resolved_by_me ? ' · <span style="color:var(--good)">resolved by you</span>' : (f.chosen ? ' · your click is spent' : '')}${f.readings_used ? ` · written tries used ${f.readings_used} of 5` : ''}</div>
       ${f.hint && !f.resolved_by_me ? `<div class="hintline">hint: ${esc(f.hint)}</div>` : ''}
+      ${f.resolved_by_me ? '' : choices ? `
+      <div class="q">${f.chosen ? 'Your click is spent. Write your own below; it pays double.' : 'What is this figure really? Pick one.'}</div>
+      <div class="choices">${choices.map((c, i) => `<button type="button" class="choice${f.chosen && f.chosen.idx === i ? (f.chosen.verdict === 'resolved' ? ' picked right' : ' picked wrong') : ''}" data-choice="${i}" ${f.chosen ? 'disabled' : ''}>${esc(c)}</button>`).join('')}</div>` : ''}
       <div class="actions">
-        <button class="small" data-act="act" ${guest ? 'disabled title="sign in to act inside the dream"' : ''}>act</button>
-        <button class="small" data-act="read" ${f.resolved_by_me ? 'disabled' : ''}>read</button>
+        <button class="small" data-act="read" ${f.resolved_by_me ? 'disabled' : ''}>${choices ? (pickedWrong ? 'write your own, pays double' : 'or write your own, pays double') : 'read'}</button>
+        <span class="faint mono">act:</span>
+        ${(f.verbs || ['touch', 'speak to', 'follow', 'open']).map((v) => `<button class="small" data-verb="${esc(v)}" ${guest ? 'disabled title="sign in to act inside the dream"' : ''}>${esc(v)}</button>`).join('')}
+        <button class="small" data-act="act" ${guest ? 'disabled title="sign in to act inside the dream"' : ''}>or say what you do</button>
       </div>
+      <form class="inline${pickedWrong ? ' open' : ''}" data-mode="read"><input type="text" maxlength="300" placeholder="who or what in waking life this stands for, e.g. a parent who waited years for me"><button class="primary small" type="submit">read it</button></form>
       <form class="inline" data-mode="act"><input type="text" maxlength="400" placeholder="what you do to it (10 to 60 words)"><button class="primary small" type="submit">do it</button></form>
-      <form class="inline" data-mode="read"><input type="text" maxlength="300" placeholder="who or what in waking life this stands for, e.g. a parent who waited years for me"><button class="primary small" type="submit">read it</button></form>
-    </div>`).join('');
+    </div>`; }).join('');
+  // the click: one option per figure
+  $('figures').querySelectorAll('button[data-choice]').forEach((b) => b.addEventListener('click', async () => {
+    const card = b.closest('.figure'); const id = card.dataset.id;
+    card.querySelectorAll('button[data-choice]').forEach((x) => { x.disabled = true; });
+    try {
+      const r = await api('/read', { figure: id, choice: Number(b.dataset.choice) });
+      if (r.verdict === 'resolved') { log(r.line + ' +' + r.lucidity_delta + ' lucidity. ' + (r.origin ? 'Origin: ' + r.origin : '') + (guest ? ' Sign in below and it stays yours.' : ''), 'good'); mark('velomna_coach_seen'); }
+      else log('Not it. ' + (r.hint ? 'Hint: ' + String(r.hint).replace(/[.\s]+$/, '') + '. ' : '') + 'Write your own reading under the figure; a written resolve pays double.', 'wrong');
+      await loadNight();
+      if (r.verdict !== 'resolved') { const c = document.querySelector(`.figure[data-id="${id}"]`); c?.scrollIntoView({ behavior: 'smooth', block: 'center' }); c?.querySelector('.inline.open input')?.focus({ preventScroll: true }); }
+    } catch (e) { toast(e.message); await loadNight(); }
+  }));
+  // the verb click: act with one word, the dream answers
+  $('figures').querySelectorAll('button[data-verb]').forEach((b) => b.addEventListener('click', async () => {
+    const card = b.closest('.figure'); const id = card.dataset.id; const verb = b.dataset.verb;
+    card.querySelectorAll('button[data-verb]').forEach((x) => { x.disabled = true; });
+    try { const r = await api('/act', { verb, figure: id, text: 'I ' + verb + ' it' }); log(r.displaced, ''); await loadNight(); }
+    catch (e) { toast(e.message); card.querySelectorAll('button[data-verb]').forEach((x) => { x.disabled = false; }); }
+  }));
   $('figures').querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => {
     const card = b.closest('.figure'); card.querySelectorAll('.inline').forEach((f) => f.classList.toggle('open', f.dataset.mode === b.dataset.act && !f.classList.contains('open')));
     const open = card.querySelector('.inline.open input'); if (open) open.focus();
@@ -222,7 +250,7 @@ function renderFigures() {
       else {
         const r = await api('/read', { figure: id, text });
         if (r.verdict === 'resolved') { log(r.line + ' +' + r.lucidity_delta + ' lucidity. ' + (r.origin ? 'Origin: ' + r.origin : '') + (guest ? ' Sign in below and it stays yours.' : ''), 'good'); mark('velomna_coach_seen'); }
-        else log((r.verdict === 'near' ? 'Near. The idea is right, the core is not. ' : 'Not it. ') + r.line + (r.hint ? ' Hint: ' + String(r.hint).replace(/[.\s]+$/, '') + '.' : '') + (r.readings_left !== undefined ? ` ${r.readings_left} readings left on this figure.` : ''), r.verdict === 'near' ? '' : 'wrong');
+        else log((r.verdict === 'near' ? 'Near. The idea is right, the core is not. ' : 'Not it. ') + r.line + (r.hint ? ' Hint: ' + String(r.hint).replace(/[.\s]+$/, '') + '.' : '') + (r.readings_left !== undefined ? ` ${r.readings_left} written tries left on this figure.` : ''), r.verdict === 'near' ? '' : 'wrong');
       }
       f.querySelector('input').value = ''; f.classList.remove('open');
       await loadNight();
@@ -254,10 +282,10 @@ $('startHere').addEventListener('click', () => {
   if (!card) { toast('The night is still forming; try again in a minute.'); return; }
   document.querySelectorAll('#figures .figure').forEach((c) => c.classList.remove('first'));
   card.classList.add('first');
-  if (!card.querySelector('.hint')) { const h = document.createElement('div'); h.className = 'hint'; h.textContent = 'start here: one sentence on what this figure really is, then press read it'; card.prepend(h); }
-  card.querySelectorAll('.inline').forEach((f) => f.classList.toggle('open', f.dataset.mode === 'read'));
+  if (!card.querySelector('.hint')) { const h = document.createElement('div'); h.className = 'hint'; h.textContent = card.querySelector('.choices') ? 'start here: pick the one that fits' : 'start here: one sentence on what this figure really is, then press read it'; card.prepend(h); }
+  if (!card.querySelector('.choices')) card.querySelectorAll('.inline').forEach((f) => f.classList.toggle('open', f.dataset.mode === 'read'));
   card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  setTimeout(() => card.querySelector('.inline.open input')?.focus({ preventScroll: true }), 600);
+  setTimeout(() => (card.querySelector('button[data-choice]:not([disabled])') || card.querySelector('.inline.open input'))?.focus({ preventScroll: true }), 600);
 });
 $('dayBack').addEventListener('click', () => { $('day').classList.remove('open'); });
 

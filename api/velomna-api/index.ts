@@ -1,4 +1,4 @@
-// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v7.2 (a miss earns the origin hint): the Big Dream at a fixed local hour every day, painted when Cloudinary keys exist; a public board; v6 guests kept.
+// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v8 (read by click: four options per figure, writing pays double): the Big Dream at a fixed local hour every day, painted when Cloudinary keys exist; a public board; v6 guests kept.
 // Humans (Supabase JWT) and agents (x-velomna-agent-key) get byte-identical responses.
 // Nothing below this door ever returns a latent. Costs are ledgered in zo_cost_logs.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -9,7 +9,8 @@ const SRK = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const admin = createClient(SUPABASE_URL, SRK, { auth: { persistSession: false } });
 const SLUG = "velomna";
 const ACTIONS_PER_NIGHT = 40;
-const READINGS_PER_FIGURE = 5;
+const READINGS_PER_FIGURE = 5; // written readings per figure; a click is one per figure
+const ACT_VERBS = ["touch", "speak to", "follow", "open"]; // the four click-verbs; free text is still allowed
 const SEEDS_PER_NIGHT = 3;
 const GUEST_READINGS_PER_NIGHT = 3; // a visitor can read three figures a night before the door
 const NIGHT_MINUTES = 90;
@@ -189,10 +190,13 @@ async function observe(d: Dreamer) {
   const scene = await sceneOf(d.matrix_id, night.night);
   if (!scene) return { night: night.night, message: "The night is forming." };
   const { data: figures } = await admin.from("velomna_figures").select("id, manifest, condensed_from").eq("scene_id", scene.id).order("created_at");
-  const { data: mine } = await admin.from("velomna_readings").select("figure_id, verdict").eq("dreamer_id", d.id).eq("scene_id", scene.id);
+  const { data: mine } = await admin.from("velomna_readings").select("figure_id, verdict, mode, sentence").eq("dreamer_id", d.id).eq("scene_id", scene.id);
   // the hint: after one miss on a figure, its origin theme ("made from 3 dreams about waiting") is shown. Theme only; the meaning and the seeds stay hidden.
-  const { data: hints } = await admin.from("velomna_latents").select("figure_id, origin_summary").eq("scene_id", scene.id);
-  const hintOf: Record<string, string> = {}; for (const h of hints ?? []) hintOf[h.figure_id] = h.origin_summary;
+  // the choices: four plain-word readings per figure, made once; the true index never leaves the door.
+  let { data: lats } = await admin.from("velomna_latents").select("figure_id, origin_summary, choices").eq("scene_id", scene.id);
+  if (!choicesTried.has(scene.id) && (lats ?? []).some((l) => !Array.isArray(l.choices))) { choicesTried.add(scene.id); await ensureChoices(scene.id); lats = (await admin.from("velomna_latents").select("figure_id, origin_summary, choices").eq("scene_id", scene.id)).data; }
+  const hintOf: Record<string, string> = {}; const choicesOf: Record<string, string[] | null> = {};
+  for (const h of lats ?? []) { hintOf[h.figure_id] = h.origin_summary; choicesOf[h.figure_id] = Array.isArray(h.choices) ? h.choices : null; }
   const { data: feed } = await admin.from("velomna_actions").select("id, presence, verb, displaced_text, created_at")
     .eq("scene_id", scene.id).order("created_at", { ascending: false }).limit(30);
   const used = await actionsTonight(d.id, scene.id);
@@ -202,8 +206,12 @@ async function observe(d: Dreamer) {
     figures: (figures ?? []).map((f) => ({
       ...f,
       resolved_by_me: (mine ?? []).some((r) => r.figure_id === f.id && r.verdict === "resolved"),
-      readings_used: (mine ?? []).filter((r) => r.figure_id === f.id).length,
+      readings_used: (mine ?? []).filter((r) => r.figure_id === f.id && r.mode !== "choice").length,
       hint: (mine ?? []).some((r) => r.figure_id === f.id) ? (hintOf[f.id] ?? null) : null,
+      choices: choicesOf[f.id] ?? null,
+      // the click already spent on this figure, if any: which option and how it went
+      chosen: (() => { const c = (mine ?? []).find((r) => r.figure_id === f.id && r.mode === "choice"); if (!c) return null; const idx = (choicesOf[f.id] ?? []).indexOf(c.sentence); return { idx, verdict: c.verdict }; })(),
+      verbs: ACT_VERBS,
     })),
     feed: feed ?? [],
     me: { kind: d.kind, presence: await presenceOf(d.id, night.night), lucidity: await balance(d.id), actions_left: d.kind === "guest" ? 0 : Math.max(0, ACTIONS_PER_NIGHT - used),
@@ -263,7 +271,7 @@ const WARPS = ["The figure turns the reading over and hands it back folded. The 
 const WARMS = ["Something in the scene leans toward you. Not yet.", "The figure holds still, which it has not done before.",
   "You are warm. The reading is the right shape and the wrong size.", "A corner of the room comes into focus and stays."];
 
-async function read(d: Dreamer, figureId: string, sentence: string) {
+async function read(d: Dreamer, figureId: string, sentence: string, choice: unknown = null) {
   const night = await currentNight(d.matrix_id);
   if (!night) return json({ error: "the world has not dreamed yet" }, 409);
   const scene = await sceneOf(d.matrix_id, night.night);
@@ -271,13 +279,33 @@ async function read(d: Dreamer, figureId: string, sentence: string) {
   // a cut night can still be read: the scene stops changing, the figures keep their meaning until the next night replaces them
   if (d.kind === "guest" && (await guestReadingsTonight(d.id, scene.id)) >= GUEST_READINGS_PER_NIGHT) return json({ error: "three readings a night before the door; sign in for five per figure, forty actions and your own seeds" }, 429);
   sentence = (sentence ?? "").trim().slice(0, 300);
-  if (sentence.split(/\s+/).length < 3) return json({ error: "a reading is one sentence of at least three words" }, 400);
+  if ((choice === null || choice === undefined) && sentence.split(/\s+/).length < 3) return json({ error: "a reading is one sentence of at least three words" }, 400);
   const { data: fig } = await admin.from("velomna_figures").select("id, manifest, condensed_from").eq("id", figureId).eq("scene_id", scene.id).maybeSingle();
   if (!fig) return json({ error: "no such figure in this night" }, 404);
-  const { data: prior } = await admin.from("velomna_readings").select("verdict").eq("dreamer_id", d.id).eq("figure_id", fig.id);
+  const { data: prior } = await admin.from("velomna_readings").select("verdict, mode").eq("dreamer_id", d.id).eq("figure_id", fig.id);
   if ((prior ?? []).some((r) => r.verdict === "resolved")) return json({ error: "you have already resolved this figure" }, 409);
-  if ((prior ?? []).length >= READINGS_PER_FIGURE) return json({ error: "five readings per figure is the limit" }, 429);
-  const { data: lat } = await admin.from("velomna_latents").select("meaning, origin_summary, embedding").eq("figure_id", fig.id).maybeSingle();
+  const { data: lat } = await admin.from("velomna_latents").select("meaning, origin_summary, embedding, choices, answer_idx").eq("figure_id", fig.id).maybeSingle();
+  // THE CLICK. One per figure. Right: half pay. Wrong: the hint, and the write box (five written tries, full pay) stays open.
+  if (choice !== null && choice !== undefined) {
+    const idx = Number(choice);
+    if (!Array.isArray(lat?.choices) || !Number.isInteger(idx) || idx < 0 || idx >= lat.choices.length) return json({ error: "no such choice" }, 400);
+    if ((prior ?? []).some((r) => r.mode === "choice")) return json({ error: "one click per figure; write your own reading for the other tries" }, 409);
+    const verdict = idx === lat.answer_idx ? "resolved" : "wrong";
+    await admin.from("velomna_readings").insert({ dreamer_id: d.id, scene_id: scene.id, figure_id: fig.id, sentence: String(lat.choices[idx]), similarity: null, verdict, mode: "choice" });
+    if (verdict === "resolved") {
+      const delta = 10 + 5 * Math.min(3, fig.condensed_from);
+      await admin.from("velomna_lucidity").insert({ dreamer_id: d.id, delta, reason: `resolved figure ${fig.id} by choice`, night: night.night });
+      if (d.kind === "human" && d.user_id) {
+        const { count } = await admin.from("velomna_resolutions").select("id", { count: "exact", head: true }).eq("user_id", d.user_id);
+        await admin.from("velomna_resolutions").insert({ user_id: d.user_id, figure_id: fig.id, night: night.night });
+        if ((count ?? 0) === 0) await admin.from("zo_product_metrics").insert({ product_slug: SLUG, event: "activation", path: "/night", source: "server" });
+      }
+      return json({ verdict, mode: "choice", lucidity_delta: delta, lucidity: await balance(d.id), origin: lat.origin_summary, line: "The figure resolves. For a moment you see what it was made of." });
+    }
+    return json({ verdict, mode: "choice", lucidity_delta: 0, lucidity: await balance(d.id), line: "Not it. The figure keeps its face.", hint: lat.origin_summary ?? null,
+      readings_left: Math.max(0, READINGS_PER_FIGURE - (prior ?? []).filter((r) => r.mode !== "choice").length) });
+  }
+  if ((prior ?? []).filter((r) => r.mode !== "choice").length >= READINGS_PER_FIGURE) return json({ error: "five written readings per figure is the limit" }, 429);
   if (!lat?.embedding) {
     await admin.from("velomna_readings").insert({ dreamer_id: d.id, scene_id: scene.id, figure_id: fig.id, sentence, similarity: null, verdict: "unknown" });
     return json({ verdict: "unknown", line: "The oracle cannot see this figure tonight. The reading is kept, not judged." });
@@ -306,7 +334,27 @@ async function read(d: Dreamer, figureId: string, sentence: string) {
   }
   const pool = verdict === "near" ? WARMS : WARPS;
   return json({ verdict, lucidity_delta: 0, lucidity: await balance(d.id), line: pool[Math.floor(Math.random() * pool.length)], hint: lat.origin_summary ?? null,
-    readings_left: Math.max(0, READINGS_PER_FIGURE - (prior ?? []).length - 1) });
+    readings_left: Math.max(0, READINGS_PER_FIGURE - (prior ?? []).filter((r) => r.mode !== "choice").length - 1) });
+}
+// four plain-word readings per figure: one true paraphrase of the meaning, three decoys with a different core. Made once, stored in the latent; the true index never leaves the door.
+const choicesTried = new Set<string>(); // one lazy attempt per scene per isolate, so a figure the model cannot phrase does not cost a call on every observe
+async function ensureChoices(sceneId: string) {
+  const { data: lats } = await admin.from("velomna_latents").select("figure_id, meaning, choices").eq("scene_id", sceneId);
+  for (const l of lats ?? []) {
+    if (Array.isArray(l.choices) && l.choices.length === 4) continue;
+    const { data: fig } = await admin.from("velomna_figures").select("manifest").eq("id", l.figure_id).maybeSingle();
+    try {
+      const j = parseJson(await claude("censor",
+        `A dream figure hides one meaning. Write FOUR short readings a player could pick from, each 6 to 14 plain everyday words, no dream imagery, no names. One must mean the same as the hidden meaning, reworded (never quoted). Three must be plausible for the figure as seen but have a clearly different core: a different person, feeling, wish or memory. Output strict JSON: {"true":"...","decoys":["...","...","..."]}`,
+        `FIGURE AS SEEN: ${fig?.manifest ?? ""}\nHIDDEN MEANING: ${l.meaning}`, 260));
+      const decoys = (j.decoys ?? []).map((x: unknown) => String(x).trim()).filter(Boolean).slice(0, 3);
+      const truth = String(j.true ?? "").trim();
+      if (!truth || decoys.length < 3) continue;
+      const idx = Math.floor(Math.random() * 4);
+      const choices = [...decoys]; choices.splice(idx, 0, truth);
+      await admin.from("velomna_latents").update({ choices, answer_idx: idx }).eq("figure_id", l.figure_id);
+    } catch (_) { /* a figure without choices can still be read by writing */ }
+  }
 }
 
 async function awake(d: Dreamer, actionId: string) {
@@ -508,6 +556,7 @@ async function runNight(force = false) {
     const meaning = String(f.meaning ?? "").slice(0, 400);
     await admin.from("velomna_latents").insert({ figure_id: fig.id, scene_id: scene.id, meaning, origin_summary: String(f.origin_summary ?? "").slice(0, 300), seed_ids: ids, embedding: await embed(meaning) });
   }
+  await ensureChoices(scene.id);
   const usedIds = (fresh ?? []).map((s) => s.id);
   if (usedIds.length) await admin.from("velomna_seeds").update({ used_in_night: nextNo }).in("id", usedIds);
   const ei = Number(out.emotion_index ?? 0);
@@ -586,7 +635,7 @@ Deno.serve(async (req) => {
     if (path === "/seed" && req.method === "POST") return await seed(d, body.text, body.source, "lag" in body ? body.lag : null);
     if ((path === "/act" || path === "/read") && (await paused())) return json({ error: "the world is paused by its keeper; seeds are still kept" }, 503);
     if (path === "/act" && req.method === "POST") return await act(d, body.verb, body.figure ?? null, body.text);
-    if (path === "/read" && req.method === "POST") return await read(d, body.figure, body.text);
+    if (path === "/read" && req.method === "POST") return await read(d, body.figure, body.text, "choice" in body ? body.choice : null);
     if (path === "/awake" && req.method === "POST") return await awake(d, body.action);
     if (path === "/agents/register" && req.method === "POST") return await registerAgent(d, body.handle, body.persona);
     return json({ error: "not found" }, 404);

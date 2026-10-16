@@ -97,6 +97,14 @@ form.door.compact input{padding:11px 14px;font-size:15px}
 .figure.first{box-shadow:0 0 0 2px var(--accent),0 0 40px rgba(232,163,90,.18)}
 .figure .hint{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
 .figure .hintline{font-family:var(--font-mono);font-size:12px;color:var(--accent-2);border-left:2px solid var(--accent);padding-left:10px}
+.figure .q{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);margin-top:4px}
+.choices{display:grid;gap:8px}
+.choice{text-align:left;font-family:var(--font-display);font-size:15px;letter-spacing:0;border-radius:12px;padding:11px 14px;line-height:1.35;backdrop-filter:none;background:rgba(236,230,216,.04)}
+.choice:hover:not([disabled]){border-color:var(--accent);background:rgba(232,163,90,.08)}
+.choice[disabled]{opacity:.45;cursor:default}
+.choice.picked.wrong{opacity:.7;border-color:rgba(236,230,216,.3);text-decoration:line-through}
+.choice.picked.right{opacity:1;border-color:var(--good);background:rgba(143,211,168,.1);color:var(--good)}
+.actions .faint{align-self:center}
 .progress{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:18px 0 6px}
 .glyphs{font-family:var(--font-mono);font-size:22px;letter-spacing:.18em;color:var(--ink-3)}
 .glyphs b{color:var(--good);font-weight:400}.glyphs i{color:var(--accent);font-style:normal}
@@ -323,16 +331,16 @@ footer a{color:var(--ink-2);text-decoration:none}
       <div class="coach" id="coach" hidden>
         <button class="x" id="coachX" aria-label="dismiss">dismiss</button>
         <div class="c"><div class="n">1 · LOOK</div><div class="h">Read the scene</div><p>It is the paragraph just below this card: what the night built from everyone's seeds. Nobody's words appear as typed.</p></div>
-        <div class="c"><div class="n">2 · READ</div><div class="h">Say what a figure really is</div><p>Scroll down to the figures, press read under one, write one sentence. The oracle answers: wrong, near, or resolved.</p></div>
+        <div class="c"><div class="n">2 · READ</div><div class="h">Pick what a figure really is</div><p>Under each figure are four plain answers. Click the one that fits. One click per figure; or write your own, which pays double.</p></div>
         <div class="c"><div class="n">3 · KEEP</div><div class="h">Resolve one and it stays yours</div><p>Lucidity is earned only this way. Sign in to act inside the dream and plant your own seed for tomorrow.</p></div>
-        <div class="go"><button class="primary" id="startHere" type="button">Start here: take me to the first figure</button><span class="note">two minutes, no wrong answers cost anything</span></div>
+        <div class="go"><button class="primary" id="startHere" type="button">Start here: take me to the first figure</button><span class="note">two minutes; a wrong click costs nothing and earns a hint</span></div>
       </div>
       <div class="progress" id="progress"></div>
       <p class="scene" id="sceneText"></p>
       <p class="faint mono" id="sceneDetail"></p>
       <div id="log"></div>
       <h2 style="margin-top:34px">Figures</h2>
-      <p class="note">A figure is a disguise. To read it, say what it hides: a person, a fear, a wish, a memory. Plain words work best; a wrong guess costs nothing and earns a hint. Five readings per figure. Act on a figure and the dream answers in its own way.</p>
+      <p class="note">A figure is a disguise. Under each one, four plain answers: click the one that fits (one click per figure). Or write your own in one sentence, which pays double and has five tries. A wrong guess costs nothing and earns a hint. Act on a figure with one word and the dream answers in its own way.</p>
       <div class="figures" id="figures"></div>
       <h2 style="margin-top:44px">Presences</h2>
       <p class="note">Other dreamers, as the world shows them. Ask one whether it is awake for 20 Lucidity; it must answer: human, agent, or echo.</p>
