@@ -231,13 +231,12 @@ footer a{color:var(--ink-2);text-decoration:none}
         <h1 id="heroTitle">A world made from <em>real dreams</em>.</h1>
         <p class="lead">Leave one dream, or one true thing from your day. The night folds it into other people's seeds until nobody can tell whose it was. Then everyone walks through what came back.</p>
         <div class="cta">
-          <a class="btn primary big" href="#/night" id="enterNow">Enter tonight's dream</a>
-          <span class="note">No sign-in. Read three figures as a visitor. Takes two minutes.</span>
+          <a class="btn primary big" href="#/night" id="enterNow">Enter the dream now</a>
+          <span class="note" id="openNote">Open now. No sign-in. Read three figures as a visitor. Two minutes.</span>
         </div>
         <form class="door compact" id="enter">
           <div class="row"><input type="email" id="email" placeholder="your email, to keep what you earn" autocomplete="email" required><button type="submit">Send me the door</button></div>
         </form>
-        <div class="clock" id="bigClock" hidden></div>
         <div class="pulse" id="pulse"><span>reading the pulse</span></div>
       </div>
     </div>
@@ -252,7 +251,8 @@ footer a{color:var(--ink-2);text-decoration:none}
           <div class="step reveal"><img data-geo="non_euclidean_house" alt="" loading="lazy" decoding="async"><div class="t"><div class="n">02 · CONDENSE</div><h3>The night builds a scene</h3><p>Your seed is folded with at least two others into figures. A room, a street, a sky. Each figure hides what it was made of.</p></div></div>
           <div class="step reveal"><img data-geo="inside_a_neuron" alt="" loading="lazy" decoding="async"><div class="t"><div class="n">03 · READ</div><h3>Say what a figure really is</h3><p>Act on it, watch the dream answer, then read it in one sentence. Right, and it resolves: you earn Lucidity and see its origin. Wrong costs nothing.</p></div></div>
         </div>
-        <p class="quiet reveal" style="margin-top:26px"><span class="mono" style="color:var(--accent)">THE BIG DREAM</span> &nbsp;Once a day, at 21:00 Toronto, the whole world dreams together. It is built from more seeds than any other night, and it opens whether or not anyone is here. The clock above counts to it. Miss it and nothing is lost.</p>
+        <p class="quiet reveal" style="margin-top:30px"><b style="color:var(--ink);font-weight:400">You never wait for VELOMNA.</b> A dream is open now and a new one opens every 90 minutes; walk into whichever one is on. Once a day there is also the Big Dream: at 21:00 Toronto the whole world dreams one dream together, built from more seeds than any other night. Miss it and nothing is lost.</p>
+        <div class="clock reveal" id="bigClock" hidden></div>
       </div>
     </section>
 

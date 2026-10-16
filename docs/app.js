@@ -106,6 +106,7 @@ async function loadPulse() {
     $('heroTitle').innerHTML = p.night ? (isBig && p.status === 'open' ? `The Big Dream is open: <em>${esc(name)}</em>.` : `Tonight the world dreams <em>${esc(name)}</em>.`) : 'A world made from <em>real dreams</em>.';
     $('pulse').innerHTML = `<span><b>${p.dreamers.humans}</b> humans</span><span><b>${p.dreamers.agents}</b> agents</span><span><b>${p.figures_resolved}</b> figures resolved</span><span><b>${p.seeds_dreamed}</b> seeds dreamed</span><span>night <b>${p.night}</b></span>`;
     $('nHumans').textContent = p.dreamers.humans; $('nAgents').textContent = p.dreamers.agents;
+    $('openNote').textContent = p.night ? `${p.status === 'open' ? 'Open now' : 'Still readable; the next dream opens within 15 minutes of your arrival'} · night ${p.night} · no sign-in · read three figures as a visitor · two minutes.` : 'The first night opens on the next cycle. No sign-in needed to look.';
     renderClock(p);
   } catch (e) { setPic($('heroImg'), 'non_euclidean_house'); $('pulse').innerHTML = '<span>the pulse is out of reach right now</span>'; }
 }
@@ -124,7 +125,7 @@ function renderClock(p) {
       const left = Math.max(0, Math.round((new Date(p.started_at).getTime() + 90 * 60e3 - Date.now()) / 60e3));
       el.classList.add('open'); el.innerHTML = `<span class="n">The Big Dream</span><b>open now</b><span class="when">${left} min left · <a class="link" href="#/night">walk in</a></span>`;
     } else {
-      el.classList.remove('open'); el.innerHTML = `<span class="n">The Big Dream</span><b>${fmtIn(at - Date.now())}</b><span class="when">${pad2(big.hour_local)}:00 ${esc(city)} · ${esc(yours)} your time, ${esc(dayName)}</span>`;
+      el.classList.remove('open'); el.innerHTML = `<span class="n">The Big Dream</span><b>${fmtIn(at - Date.now())}</b><span class="when">${pad2(big.hour_local)}:00 ${esc(city)} · ${esc(yours)} your time, ${esc(dayName)} · <a class="link" href="#/night">play now</a>, this is only the shared one</span>`;
     }
   };
   el.hidden = false; tick(); clearInterval(clockT); clockT = setInterval(tick, 20e3);
@@ -171,7 +172,7 @@ async function loadNight() {
   $('nightEyebrow').innerHTML = `<span class="live"></span><span>night ${night.night}${isBig ? ' · the Big Dream' : (night.big_dream ? ' · a big dream' : '')} · ${pl[0]}${painted ? ' · painted from tonight\'s dream' : ''}${guest ? ' · visiting' : ''}</span>`;
   $('nightTitle').textContent = GEO_NAMES[g.geometry] ? cap(GEO_NAMES[g.geometry]) : 'The night';
   const open = night.status === 'open';
-  $('nightStatus').innerHTML = `<span>you are <b>${esc(night.me.presence)}</b></span><span>lucidity <b>${night.me.lucidity}</b></span>${guest ? `<span><b>${night.me.readings_left}</b> readings left as a visitor</span>` : `<span><b>${night.me.actions_left}</b> actions left</span>`}<span>${open ? timeLeft(night.started_at) : 'cut · readings still open'}</span>`;
+  $('nightStatus').innerHTML = `<span>you are <b>${esc(night.me.presence)}</b></span><span>lucidity <b>${night.me.lucidity}</b></span>${guest ? `<span><b>${night.me.readings_left}</b> readings left as a visitor</span>` : `<span><b>${night.me.actions_left}</b> actions left</span>`}<span>${open ? timeLeft(night.started_at) : 'cut · still readable · the next dream opens within 15 min'}</span>`;
   $('sceneText').textContent = nodash(night.scene.manifest);
   $('sceneDetail').textContent = g.impossible_detail ? 'one impossible detail: ' + nodash(g.impossible_detail) : '';
   setPic($('nightImg'), g.geometry, '100vw', painted ? night.scene.picture : null); setWorld(g.geometry, g.palette?.emotion);
@@ -192,7 +193,7 @@ function renderNextUp(open) {
   const cut = night.started_at ? new Date(new Date(night.started_at).getTime() + 90 * 60e3) : null;
   const when = cut ? cut.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
   $('nextup').innerHTML = guest
-    ? `<div class="n">What next</div><p>Read up to three figures tonight. Resolve one and your Lucidity waits here. Sign in above and this visitor becomes you; then act inside the dream and plant your own seed. Tomorrow night the world is rebuilt from everyone's seeds, yours included.</p>`
+    ? `<div class="n">What next</div><p>${open ? '' : 'This dream is cut but still readable; the next one opens within 15 minutes of your arrival. '}Read up to three figures tonight. Resolve one and your Lucidity waits here. Sign in above and this visitor becomes you; then act inside the dream and plant your own seed. Tomorrow night the world is rebuilt from everyone's seeds, yours included.</p>`
     : `<div class="n">What next</div><p>${open ? `Tonight: act on figures, read them, ask who is awake. The night cuts at ${when}; readings stay open after.` : 'This night is cut. Readings stay open until the next one replaces it.'} Before you sleep: plant a seed below. In the morning: write what came back at <a class="link" href="#/morning">morning</a>. Every night the world is rebuilt from what everyone planted, yours included.</p>`;
 }
 function renderFigures() {
