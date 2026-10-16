@@ -222,7 +222,7 @@ function renderFigures() {
       else {
         const r = await api('/read', { figure: id, text });
         if (r.verdict === 'resolved') { log(r.line + ' +' + r.lucidity_delta + ' lucidity. ' + (r.origin ? 'Origin: ' + r.origin : '') + (guest ? ' Sign in below and it stays yours.' : ''), 'good'); mark('velomna_coach_seen'); }
-        else log((r.verdict === 'near' ? 'Near. The idea is right, the core is not. ' : 'Not it. ') + r.line + (r.hint ? ' Hint: ' + r.hint + '.' : '') + (r.readings_left !== undefined ? ` ${r.readings_left} readings left on this figure.` : ''), r.verdict === 'near' ? '' : 'wrong');
+        else log((r.verdict === 'near' ? 'Near. The idea is right, the core is not. ' : 'Not it. ') + r.line + (r.hint ? ' Hint: ' + String(r.hint).replace(/[.\s]+$/, '') + '.' : '') + (r.readings_left !== undefined ? ` ${r.readings_left} readings left on this figure.` : ''), r.verdict === 'near' ? '' : 'wrong');
       }
       f.querySelector('input').value = ''; f.classList.remove('open');
       await loadNight();
