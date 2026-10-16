@@ -247,6 +247,17 @@ $('seedForm').addEventListener('submit', async (ev) => {
 });
 $('daylight').addEventListener('click', () => { $('day').classList.add('open'); });
 $('coachX').addEventListener('click', () => { mark('velomna_coach_seen'); $('coach').hidden = true; });
+// "Start here": the founder could not find step one. Take the newcomer to the first unresolved figure, open its read box, say what to do.
+$('startHere').addEventListener('click', () => {
+  const card = [...document.querySelectorAll('#figures .figure')].find((c) => !c.classList.contains('done')) || document.querySelector('#figures .figure');
+  if (!card) { toast('The night is still forming; try again in a minute.'); return; }
+  document.querySelectorAll('#figures .figure').forEach((c) => c.classList.remove('first'));
+  card.classList.add('first');
+  if (!card.querySelector('.hint')) { const h = document.createElement('div'); h.className = 'hint'; h.textContent = 'start here: one sentence on what this figure really is, then press read it'; card.prepend(h); }
+  card.querySelectorAll('.inline').forEach((f) => f.classList.toggle('open', f.dataset.mode === 'read'));
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  setTimeout(() => card.querySelector('.inline.open input')?.focus({ preventScroll: true }), 600);
+});
 $('dayBack').addEventListener('click', () => { $('day').classList.remove('open'); });
 
 // ─── morning ───

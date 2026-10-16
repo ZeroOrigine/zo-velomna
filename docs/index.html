@@ -93,6 +93,9 @@ form.door.compact input{padding:11px 14px;font-size:15px}
 .coach p{font-size:14px;color:var(--ink-2);margin:0}
 .coach .x{position:absolute;top:8px;right:10px;background:none;border:0;color:var(--ink-3);padding:4px 8px;font-size:12px;backdrop-filter:none}
 .coach .x:hover{color:var(--ink)}
+.coach .go{grid-column:1/-1;display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-top:6px;border-top:1px solid rgba(232,163,90,.25)}
+.figure.first{box-shadow:0 0 0 2px var(--accent),0 0 40px rgba(232,163,90,.18)}
+.figure .hint{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
 .progress{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:18px 0 6px}
 .glyphs{font-family:var(--font-mono);font-size:22px;letter-spacing:.18em;color:var(--ink-3)}
 .glyphs b{color:var(--good);font-weight:400}.glyphs i{color:var(--accent);font-style:normal}
@@ -318,9 +321,10 @@ footer a{color:var(--ink-2);text-decoration:none}
     <div class="wrap body">
       <div class="coach" id="coach" hidden>
         <button class="x" id="coachX" aria-label="dismiss">dismiss</button>
-        <div class="c"><div class="n">1 · LOOK</div><div class="h">Read the scene</div><p>This is what the night built from everyone's seeds. Nobody's words appear as typed.</p></div>
-        <div class="c"><div class="n">2 · READ</div><div class="h">Say what a figure really is</div><p>Pick a figure below, press read, write one sentence. The oracle answers: wrong, near, or resolved.</p></div>
+        <div class="c"><div class="n">1 · LOOK</div><div class="h">Read the scene</div><p>It is the paragraph just below this card: what the night built from everyone's seeds. Nobody's words appear as typed.</p></div>
+        <div class="c"><div class="n">2 · READ</div><div class="h">Say what a figure really is</div><p>Scroll down to the figures, press read under one, write one sentence. The oracle answers: wrong, near, or resolved.</p></div>
         <div class="c"><div class="n">3 · KEEP</div><div class="h">Resolve one and it stays yours</div><p>Lucidity is earned only this way. Sign in to act inside the dream and plant your own seed for tomorrow.</p></div>
+        <div class="go"><button class="primary" id="startHere" type="button">Start here: take me to the first figure</button><span class="note">two minutes, no wrong answers cost anything</span></div>
       </div>
       <div class="progress" id="progress"></div>
       <p class="scene" id="sceneText"></p>
