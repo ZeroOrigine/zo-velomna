@@ -1,4 +1,4 @@
-// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v7.1 (echoes never on the board): the Big Dream at a fixed local hour every day, painted when Cloudinary keys exist; a public board; v6 guests kept.
+// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v7.2 (a miss earns the origin hint): the Big Dream at a fixed local hour every day, painted when Cloudinary keys exist; a public board; v6 guests kept.
 // Humans (Supabase JWT) and agents (x-velomna-agent-key) get byte-identical responses.
 // Nothing below this door ever returns a latent. Costs are ledgered in zo_cost_logs.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -190,6 +190,9 @@ async function observe(d: Dreamer) {
   if (!scene) return { night: night.night, message: "The night is forming." };
   const { data: figures } = await admin.from("velomna_figures").select("id, manifest, condensed_from").eq("scene_id", scene.id).order("created_at");
   const { data: mine } = await admin.from("velomna_readings").select("figure_id, verdict").eq("dreamer_id", d.id).eq("scene_id", scene.id);
+  // the hint: after one miss on a figure, its origin theme ("made from 3 dreams about waiting") is shown. Theme only; the meaning and the seeds stay hidden.
+  const { data: hints } = await admin.from("velomna_latents").select("figure_id, origin_summary").eq("scene_id", scene.id);
+  const hintOf: Record<string, string> = {}; for (const h of hints ?? []) hintOf[h.figure_id] = h.origin_summary;
   const { data: feed } = await admin.from("velomna_actions").select("id, presence, verb, displaced_text, created_at")
     .eq("scene_id", scene.id).order("created_at", { ascending: false }).limit(30);
   const used = await actionsTonight(d.id, scene.id);
@@ -200,6 +203,7 @@ async function observe(d: Dreamer) {
       ...f,
       resolved_by_me: (mine ?? []).some((r) => r.figure_id === f.id && r.verdict === "resolved"),
       readings_used: (mine ?? []).filter((r) => r.figure_id === f.id).length,
+      hint: (mine ?? []).some((r) => r.figure_id === f.id) ? (hintOf[f.id] ?? null) : null,
     })),
     feed: feed ?? [],
     me: { kind: d.kind, presence: await presenceOf(d.id, night.night), lucidity: await balance(d.id), actions_left: d.kind === "guest" ? 0 : Math.max(0, ACTIONS_PER_NIGHT - used),
@@ -301,7 +305,8 @@ async function read(d: Dreamer, figureId: string, sentence: string) {
       line: "The figure resolves. For a moment you see what it was made of." });
   }
   const pool = verdict === "near" ? WARMS : WARPS;
-  return json({ verdict, lucidity_delta: 0, lucidity: await balance(d.id), line: pool[Math.floor(Math.random() * pool.length)] });
+  return json({ verdict, lucidity_delta: 0, lucidity: await balance(d.id), line: pool[Math.floor(Math.random() * pool.length)], hint: lat.origin_summary ?? null,
+    readings_left: Math.max(0, READINGS_PER_FIGURE - (prior ?? []).length - 1) });
 }
 
 async function awake(d: Dreamer, actionId: string) {

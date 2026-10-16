@@ -201,12 +201,13 @@ function renderFigures() {
     <div class="figure${f.resolved_by_me ? ' done' : ''}" data-id="${f.id}">
       <div class="text">${esc(f.manifest)}</div>
       <div class="note">made from ${f.condensed_from} seeds · readings used ${f.readings_used} of 5${f.resolved_by_me ? ' · <span style="color:var(--good)">resolved by you</span>' : ''}</div>
+      ${f.hint && !f.resolved_by_me ? `<div class="hintline">hint: ${esc(f.hint)}</div>` : ''}
       <div class="actions">
         <button class="small" data-act="act" ${guest ? 'disabled title="sign in to act inside the dream"' : ''}>act</button>
         <button class="small" data-act="read" ${f.resolved_by_me ? 'disabled' : ''}>read</button>
       </div>
       <form class="inline" data-mode="act"><input type="text" maxlength="400" placeholder="what you do to it (10 to 60 words)"><button class="primary small" type="submit">do it</button></form>
-      <form class="inline" data-mode="read"><input type="text" maxlength="300" placeholder="one sentence: what this figure really is"><button class="primary small" type="submit">read it</button></form>
+      <form class="inline" data-mode="read"><input type="text" maxlength="300" placeholder="who or what in waking life this stands for, e.g. a parent who waited years for me"><button class="primary small" type="submit">read it</button></form>
     </div>`).join('');
   $('figures').querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => {
     const card = b.closest('.figure'); card.querySelectorAll('.inline').forEach((f) => f.classList.toggle('open', f.dataset.mode === b.dataset.act && !f.classList.contains('open')));
@@ -221,7 +222,7 @@ function renderFigures() {
       else {
         const r = await api('/read', { figure: id, text });
         if (r.verdict === 'resolved') { log(r.line + ' +' + r.lucidity_delta + ' lucidity. ' + (r.origin ? 'Origin: ' + r.origin : '') + (guest ? ' Sign in below and it stays yours.' : ''), 'good'); mark('velomna_coach_seen'); }
-        else log(r.line, r.verdict === 'near' ? '' : 'wrong');
+        else log((r.verdict === 'near' ? 'Near. The idea is right, the core is not. ' : 'Not it. ') + r.line + (r.hint ? ' Hint: ' + r.hint + '.' : '') + (r.readings_left !== undefined ? ` ${r.readings_left} readings left on this figure.` : ''), r.verdict === 'near' ? '' : 'wrong');
       }
       f.querySelector('input').value = ''; f.classList.remove('open');
       await loadNight();
