@@ -195,6 +195,35 @@ section.block{padding-block:clamp(56px,9vw,110px)}
 .day.open{display:flex}
 .day h1{color:#2a2418;max-width:none}.day p{color:#5a4f3d;margin-inline:auto}.day button{color:#2a2418;border-color:#2a2418;background:none}
 .view{display:none}.view.open{display:block}
+/* PLAY: the game as cards. Nothing else on screen. */
+body.playing .top{display:none}
+.play{position:relative;min-height:100svh;display:grid;place-items:center;isolation:isolate;overflow:hidden;padding-block:84px 40px}
+.play .pic{position:absolute;inset:0;z-index:0;overflow:hidden;background:#0b0912}
+.play .veil{position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg,rgba(6,5,10,.6),rgba(6,5,10,.55) 50%,rgba(6,5,10,.85))}
+.playTop{position:absolute;top:0;left:0;right:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:max(16px,env(safe-area-inset-top,0px))}
+.playTop .row{gap:14px}
+.dots{font-family:var(--font-mono);font-size:14px;letter-spacing:.32em;color:var(--ink-3)}
+.dots b{color:var(--accent);font-weight:400}.dots i{color:var(--good);font-style:normal}
+.card{position:relative;z-index:2;width:min(640px,calc(100% - 2*var(--gutter-l)));background:rgba(6,5,10,.84);backdrop-filter:blur(16px);border:1px solid var(--line);border-radius:22px;padding:clamp(20px,4vw,34px);display:grid;gap:14px;animation:cardin .5s ease}
+@keyframes cardin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.card .eyebrow{margin-bottom:0}
+.card h2{margin:0}
+.card p{max-width:none}
+.card .scene{font-size:clamp(1.05rem,1.5vw,1.2rem);line-height:1.6;font-weight:300}
+.card .scene::first-letter{font-size:1em;float:none;padding:0;color:inherit}
+.card .fig{font-size:clamp(1.15rem,1.8vw,1.4rem);line-height:1.45;font-weight:300}
+.card .choices{gap:10px}
+.card .choice{font-size:16px;padding:14px 16px}
+.card .go{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:4px}
+.card button.primary.wide{width:100%;padding:15px 20px;font-size:15px}
+.card .result{border-left:2px solid var(--accent);padding:6px 0 6px 14px;font-style:italic;font-size:1.05rem}
+.card .result.good{border-color:var(--good)}.card .result.wrong{border-color:var(--ink-3)}
+.card form.door{margin-top:0;max-width:none}
+.card .stat{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--font-mono);font-size:12px;color:var(--ink-2)}
+.card .stat b{color:var(--ink);font-weight:500}
+.card .bigglyphs{font-family:var(--font-mono);font-size:34px;letter-spacing:.2em;color:var(--ink-3)}
+.card .bigglyphs b{color:var(--good);font-weight:400}.card .bigglyphs i{color:var(--accent);font-style:normal}
+@media (max-width:640px){.playTop .link{display:none}.card{border-radius:18px}}
 code,pre{font-family:var(--font-mono);font-size:12.5px}
 pre{white-space:pre-wrap;word-break:break-word;background:rgba(236,230,216,.05);border:1px solid var(--line);border-radius:12px;padding:14px;max-width:44rem;overflow-x:auto}
 .key{font-family:var(--font-mono);font-size:14px;color:var(--good);word-break:break-all;background:rgba(143,211,168,.08);border:1px solid rgba(143,211,168,.3);border-radius:10px;padding:12px}
@@ -243,8 +272,8 @@ footer a{color:var(--ink-2);text-decoration:none}
         <h1 id="heroTitle">A world made from <em>real dreams</em>.</h1>
         <p class="lead">Leave one dream, or one true thing from your day. The night folds it into other people's seeds until nobody can tell whose it was. Then everyone walks through what came back.</p>
         <div class="cta">
-          <a class="btn primary big" href="#/night" id="enterNow">Enter the dream now</a>
-          <span class="note" id="openNote">Open now. No sign-in. Read three figures as a visitor. Two minutes.</span>
+          <a class="btn primary big" href="#/play" id="enterNow">Play tonight's dream</a>
+          <span class="note" id="openNote">Open now. One question at a time. No sign-in. Two minutes.</span>
         </div>
         <form class="door compact" id="enter">
           <div class="row"><input type="email" id="email" placeholder="your email, to keep what you earn" autocomplete="email" required><button type="submit">Send me the door</button></div>
@@ -313,6 +342,20 @@ footer a{color:var(--ink-2);text-decoration:none}
         </form>
       </div>
     </section>
+  </section>
+
+  <!-- PLAY: one card, one question, one tap, next -->
+  <section class="view" id="v-play">
+    <div class="play">
+      <div class="pic"><img id="playImg" alt="" decoding="async"></div>
+      <div class="veil"></div>
+      <div class="playTop wrap">
+        <a class="word" href="#/">VELOMNA</a>
+        <span class="dots" id="playDots" aria-label="progress"></span>
+        <span class="row"><a class="link" href="#/night">full night</a><button class="small" id="playLeave" title="End the night instantly. No cost.">daylight</button></span>
+      </div>
+      <div class="card" id="playCard"><p class="note">the night is loading</p></div>
+    </div>
   </section>
 
   <!-- NIGHT -->

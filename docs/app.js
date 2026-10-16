@@ -1,4 +1,4 @@
-// VELOMNA web portal v5 (read by click, act by click, writing optional and worth double): the Big Dream clock, the board, and a night's own picture when it has one. Vanilla ES module. The API is the one door; this file only asks and shows.
+// VELOMNA web portal v6 (PLAY: the game as cards, one question at a time; the night page stays as the full view): the Big Dream clock, the board, and a night's own picture when it has one. Vanilla ES module. The API is the one door; this file only asks and shows.
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/+esm';
 
 const SUPABASE_URL = 'https://opgitcuqwicuiplaptkm.supabase.co';
@@ -62,7 +62,7 @@ const io = 'IntersectionObserver' in window ? new IntersectionObserver((es) => e
 function arm() { document.querySelectorAll('.reveal:not(.in)').forEach((el) => io ? io.observe(el) : el.classList.add('in')); }
 
 // ─── routing ───
-const VIEWS = ['home', 'night', 'morning', 'agents', 'law'];
+const VIEWS = ['home', 'play', 'night', 'morning', 'agents', 'law'];
 function route() {
   const h = (location.hash.replace(/^#\/?/, '').split('?')[0]) || 'home';
   const v = VIEWS.includes(h) ? h : 'home';
@@ -71,7 +71,9 @@ function route() {
   beacon('/' + (v === 'home' ? '' : v));
   // static bands carry their own still
   document.querySelectorAll('#v-' + v + ' img[data-geo]').forEach((img) => { if (!img.src) setPic(img, img.dataset.geo, img.closest('.step') ? '(max-width:640px) 100vw, 33vw' : '100vw'); });
+  document.body.classList.toggle('playing', v === 'play');
   if (v === 'home') loadPulse();
+  if (v === 'play') loadPlay();
   if (v === 'night') loadNight();
   if (v === 'morning') { loadMorning(); setWorld('backward_hour', 'warmth'); }
   if (v === 'agents') setWorld('inside_a_neuron', 'awe');
@@ -144,15 +146,18 @@ async function loadBoard() {
     arm();
   } catch (e) { $('boardRows').innerHTML = '<li class="note">the board is out of reach right now</li>'; }
 }
-document.querySelectorAll('form.door#enter, form.door#enter2, form.door#enter3').forEach((f) => f.addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const email = f.querySelector('input[type=email]').value.trim(); if (!email) return;
-  const btn = f.querySelector('button'); btn.disabled = true;
-  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + '/#/night' } });
-  btn.disabled = false;
-  if (error) { toast('The door did not send: ' + error.message); return; }
-  toast('Sent. Open the link from this device; it lands you in tonight\'s world.');
-}));
+function wireDoor(f, landing = '/#/night') {
+  f.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const email = f.querySelector('input[type=email]').value.trim(); if (!email) return;
+    const btn = f.querySelector('button'); btn.disabled = true;
+    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + landing } });
+    btn.disabled = false;
+    if (error) { toast('The door did not send: ' + error.message); return; }
+    toast('Sent. Open the link from this device; it lands you in tonight\'s world.');
+  });
+}
+document.querySelectorAll('form.door#enter, form.door#enter2, form.door#enter3').forEach((f) => wireDoor(f));
 
 // ─── night ───
 let night = null;
@@ -182,13 +187,125 @@ function glyphs() { return night.figures.map((f) => f.resolved_by_me ? '<b>\u25c
 function renderProgress() {
   const done = night.figures.filter((f) => f.resolved_by_me).length;
   $('progress').innerHTML = `<span class="glyphs" title="resolved, read, unread">${glyphs()}</span><span class="note"><b>${done}</b> of ${night.figures.length} figures resolved by you tonight</span><button class="small" id="shareBtn">share tonight</button>`;
-  $('shareBtn').addEventListener('click', async () => {
-    const name = GEO_NAMES[night.scene.genome?.geometry] || 'a place still forming';
-    const text = `VELOMNA night ${night.night}${night.scene.kind === 'big' ? ', the Big Dream' : ''}: ${name}. I resolved ${done} of ${night.figures.length} figures ${night.figures.map((f) => f.resolved_by_me ? '\u25c6' : ((f.readings_used || f.chosen) ? '\u25c7' : '\u00b7')).join('')}\nA world made from real dreams. Yours goes in tomorrow night.\nhttps://velomna.zeroorigine.com`;
-    try { if (navigator.share) { await navigator.share({ text }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
-    try { await navigator.clipboard.writeText(text); toast('Copied. Paste it anywhere.'); } catch (e) { toast(text); }
+  $('shareBtn').addEventListener('click', shareNight);
+}
+function shareText() {
+  const done = night.figures.filter((f) => f.resolved_by_me).length;
+  const name = GEO_NAMES[night.scene.genome?.geometry] || 'a place still forming';
+  return `VELOMNA night ${night.night}${night.scene.kind === 'big' ? ', the Big Dream' : ''}: ${name}. I resolved ${done} of ${night.figures.length} figures ${night.figures.map((f) => f.resolved_by_me ? '\u25c6' : ((f.readings_used || f.chosen) ? '\u25c7' : '\u00b7')).join('')}\nA world made from real dreams. Yours goes in tomorrow night.\nhttps://velomna.zeroorigine.com`;
+}
+async function shareNight() {
+  const text = shareText();
+  try { if (navigator.share) { await navigator.share({ text }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(text); toast('Copied. Paste it anywhere.'); } catch (e) { toast(text); }
+}
+
+// ─── PLAY: the game as cards. One screen, one question, one tap, next. Same data, same door. ───
+const play = { step: 'enter', i: 0, results: {} };
+function playDots() {
+  if (!night?.figures) return '';
+  return night.figures.map((f, i) => f.resolved_by_me ? '<i>\u25c6</i>' : (play.step === i ? '<b>\u25cf</b>' : ((f.readings_used || f.chosen) ? '\u25c7' : '\u00b7'))).join('');
+}
+async function loadPlay() {
+  $('playCard').innerHTML = '<p class="note">the night is loading</p>';
+  try { night = await api('/observe'); } catch (e) { $('playCard').innerHTML = `<p class="note">${esc(e.message)}</p><a class="btn primary" href="#/">back</a>`; setPic($('playImg'), 'ordinary_room'); return; }
+  guest = night.me?.kind === 'guest';
+  if (!night.scene) { $('playCard').innerHTML = `<div class="eyebrow">the night</div><h2>${esc(night.message || 'The night is forming.')}</h2><p class="quiet">${guest ? 'The first night opens on the cycle. Sign in and leave a seed to wake it.' : 'Leave a seed on the night page; the next night opens on the cycle.'}</p><a class="btn primary" href="#/night">the night page</a>`; setPic($('playImg'), 'ordinary_room'); return; }
+  const g = night.scene.genome || {};
+  setPic($('playImg'), g.geometry, '100vw', okId(night.scene.picture) ? night.scene.picture : null); setWorld(g.geometry, g.palette?.emotion);
+  // resume where the player was: the first figure not yet settled, unless they are mid-flow
+  if (play.step === 'enter' && night.figures.some((f) => f.resolved_by_me || f.chosen || f.readings_used)) { const k = night.figures.findIndex((f) => !f.resolved_by_me && !f.chosen); play.step = k === -1 ? 'done' : k; }
+  renderPlay();
+}
+function nextFigure() {
+  const n = night.figures.length;
+  const from = typeof play.step === 'number' ? play.step : -1;
+  let k = -1;
+  for (let j = from + 1; j < n; j++) { const f = night.figures[j]; if (!f.resolved_by_me && !f.chosen) { k = j; break; } }
+  if (k === -1) for (let j = from + 1; j < n; j++) { if (!night.figures[j].resolved_by_me) { k = j; break; } }
+  play.step = k === -1 ? 'done' : k;
+  renderPlay();
+}
+function renderPlay() {
+  const c = $('playCard'); const g = night.scene.genome || {}; const name = GEO_NAMES[g.geometry] || 'a place still forming';
+  const n = night.figures.length; const done = night.figures.filter((f) => f.resolved_by_me).length;
+  $('playDots').innerHTML = playDots();
+  const isBig = night.scene.kind === 'big';
+  if (play.step === 'enter') {
+    c.innerHTML = `<div class="eyebrow"><span class="live"></span><span>night ${night.night}${isBig ? ' · the Big Dream' : ''} · ${PLACE[g.place_label]?.[0] || 'ordinary'}</span></div>
+      <h2>Tonight the world dreams <em>${esc(name)}</em>.</h2>
+      <p class="quiet">${n} figures hide ${n} real things: a person, a fear, a wish, a memory. Pick what each one is. Right answers earn Lucidity.${guest ? ' As a visitor you get three answers tonight.' : ''}</p>
+      <div class="stat"><span>you are <b>${esc(night.me.presence)}</b></span><span>lucidity <b>${night.me.lucidity}</b></span></div>
+      <button class="primary wide" id="pBegin">Begin</button>`;
+    $('pBegin').addEventListener('click', () => { play.step = 'scene'; renderPlay(); });
+    return;
+  }
+  if (play.step === 'scene') {
+    c.innerHTML = `<div class="eyebrow"><span>what you see</span></div>
+      <p class="scene">${esc(night.scene.manifest)}</p>
+      ${g.impossible_detail ? `<p class="note">one impossible detail: ${esc(g.impossible_detail)}</p>` : ''}
+      <button class="primary wide" id="pNext">Meet the first figure</button>`;
+    $('pNext').addEventListener('click', () => { play.step = night.figures.findIndex((f) => !f.resolved_by_me && !f.chosen); if (play.step === -1) play.step = 0; renderPlay(); });
+    return;
+  }
+  if (play.step === 'done') {
+    const glyph = night.figures.map((f) => f.resolved_by_me ? '<b>\u25c6</b>' : ((f.readings_used || f.chosen) ? '<i>\u25c7</i>' : '\u00b7')).join('');
+    const cutIn = night.started_at ? Math.max(0, Math.round((new Date(night.started_at).getTime() + 90 * 60e3 - Date.now()) / 60e3)) : null;
+    c.innerHTML = `<div class="eyebrow"><span>night ${night.night} · ${esc(name)}</span></div>
+      <div class="bigglyphs">${glyph}</div>
+      <h2>You resolved ${done} of ${n}.</h2>
+      <div class="stat"><span>lucidity <b>${night.me.lucidity}</b></span>${cutIn !== null && night.status === 'open' ? `<span>next dream in <b>${cutIn}</b> min</span>` : '<span>the next dream opens within 15 min</span>'}</div>
+      ${guest ? `<p class="quiet">Sign in with one link and this visitor becomes you: your Lucidity stays, and you can act inside the dream and plant your own seed.</p>
+        <form class="door" id="enter4"><div class="row"><input type="email" placeholder="your email" autocomplete="email" required><button class="primary" type="submit">Send me the door</button></div><p class="note">One link, no password. Free. Adults only.</p></form>`
+      : `<p class="quiet">Tomorrow's dream is built from what everyone plants tonight. Leave one thing: a dream you remember, or one true thing from today. Nobody ever reads these words.</p>
+        <form class="door" id="pSeed"><textarea placeholder="four words or more" maxlength="2400"></textarea><div class="row"><button class="primary" type="submit">Plant it</button><span class="note" id="pSeedNote">three a night; it enters the next dream</span></div></form>`}
+      <div class="go"><button class="small" id="pShare">share tonight</button><a class="btn" href="#/night">explore the full night</a><a class="btn" href="#/">home</a></div>`;
+    $('pShare').addEventListener('click', shareNight);
+    if (guest) wireDoor($('enter4'), '/#/play');
+    else $('pSeed').addEventListener('submit', async (ev) => { ev.preventDefault(); const t = ev.target.querySelector('textarea').value.trim(); if (!t) return; const b = ev.target.querySelector('button'); b.disabled = true; try { const r = await api('/seed', { text: t, source: 'dream' }); ev.target.querySelector('textarea').value = ''; $('pSeedNote').textContent = nodash(r.note); } catch (e) { toast(e.message); } b.disabled = false; });
+    return;
+  }
+  // a figure
+  const f = night.figures[play.step]; if (!f) { play.step = 'done'; renderPlay(); return; }
+  const r = play.results[f.id];
+  const choices = Array.isArray(f.choices) && f.choices.length ? f.choices : null;
+  const settled = f.resolved_by_me || (r && r.verdict === 'resolved');
+  const noMore = guest && night.me.readings_left === 0 && !settled;
+  const writtenLeft = Math.max(0, 5 - (f.readings_used || 0));
+  c.innerHTML = `<div class="eyebrow"><span>figure ${play.step + 1} of ${n}</span></div>
+    <p class="fig">${esc(f.manifest)}</p>
+    ${settled ? `<div class="result good">${esc(r ? r.line + ' +' + r.lucidity_delta + ' lucidity.' + (r.origin ? ' Origin: ' + r.origin : '') : 'Resolved by you.')}</div>`
+      : noMore ? `<div class="result wrong">Three answers a night as a visitor. Sign in for five per figure and the whole night.</div>`
+      : r ? `<div class="result ${r.verdict === 'near' ? '' : 'wrong'}">${esc((r.verdict === 'near' ? 'Near. The idea is right, the core is not. ' : 'Not it. ') + (r.hint ? 'Hint: ' + String(r.hint).replace(/[.\s]+$/, '') + '.' : ''))}</div>` : (f.hint ? `<div class="hintline">hint: ${esc(f.hint)}</div>` : '')}
+    ${!settled && !noMore && choices && !f.chosen && !r ? `<div class="q">What is this figure really? Pick one.</div><div class="choices">${choices.map((x, i) => `<button type="button" class="choice" data-choice="${i}">${esc(x)}</button>`).join('')}</div>
+      <p class="note">One click per figure. Or <a class="link" href="#" id="pWriteLink">write your own</a>: it pays double.</p>` : ''}
+    ${!settled && !noMore && (f.chosen || r || !choices) && writtenLeft > 0 ? `<form class="door" id="pWrite"><div class="q">${choices ? 'Your own reading, in one sentence (pays double)' : 'What is this figure really? One sentence.'}</div><div class="row"><input type="text" maxlength="300" placeholder="who or what in waking life this stands for"><button class="primary" type="submit">read it</button></div><p class="note">${writtenLeft} written tries left on this figure</p></form>` : ''}
+    <div class="go">${settled || r || f.chosen || noMore ? `<button class="primary wide" id="pNext">${play.step + 1 < n ? 'Next figure' : 'Finish the night'}</button>` : `<button class="small" id="pSkip">skip this one</button>`}</div>`;
+  c.querySelectorAll('button[data-choice]').forEach((b) => b.addEventListener('click', async () => {
+    c.querySelectorAll('button[data-choice]').forEach((x) => { x.disabled = true; });
+    try { const res = await api('/read', { figure: f.id, choice: Number(b.dataset.choice) }); play.results[f.id] = res; if (res.verdict === 'resolved') mark('velomna_coach_seen'); night = await api('/observe'); renderPlay(); }
+    catch (e) { toast(e.message); night = await api('/observe'); renderPlay(); }
+  }));
+  const wl = $('pWriteLink'); if (wl) wl.addEventListener('click', (ev) => { ev.preventDefault(); play.results[f.id] = play.results[f.id] || { verdict: 'open', line: '' }; c.querySelector('.choices')?.remove(); c.querySelector('.q')?.remove(); wl.closest('p')?.remove(); renderPlayWriteBox(c, f, writtenLeft); });
+  const wf = $('pWrite'); if (wf) wireWrite(wf, f);
+  const nx = $('pNext'); if (nx) nx.addEventListener('click', nextFigure);
+  const sk = $('pSkip'); if (sk) sk.addEventListener('click', nextFigure);
+}
+function renderPlayWriteBox(c, f, writtenLeft) {
+  const form = document.createElement('form'); form.className = 'door'; form.id = 'pWrite';
+  form.innerHTML = `<div class="q">Your own reading, in one sentence (pays double)</div><div class="row"><input type="text" maxlength="300" placeholder="who or what in waking life this stands for"><button class="primary" type="submit">read it</button></div><p class="note">${writtenLeft} written tries left on this figure</p>`;
+  c.querySelector('.go').before(form); wireWrite(form, f); form.querySelector('input').focus();
+  const go = c.querySelector('.go'); go.innerHTML = `<button class="small" id="pSkip">skip this one</button>`; $('pSkip').addEventListener('click', nextFigure);
+}
+function wireWrite(form, f) {
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault(); const text = form.querySelector('input').value.trim(); if (!text) return;
+    const b = form.querySelector('button'); b.disabled = true;
+    try { const res = await api('/read', { figure: f.id, text }); play.results[f.id] = res; if (res.verdict === 'resolved') mark('velomna_coach_seen'); night = await api('/observe'); renderPlay(); }
+    catch (e) { toast(e.message); b.disabled = false; }
   });
 }
+$('playLeave').addEventListener('click', () => { $('day').classList.add('open'); });
 function renderNextUp(open) {
   const cut = night.started_at ? new Date(new Date(night.started_at).getTime() + 90 * 60e3) : null;
   const when = cut ? cut.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
@@ -277,7 +394,8 @@ $('seedForm').addEventListener('submit', async (ev) => {
 $('daylight').addEventListener('click', () => { $('day').classList.add('open'); });
 $('coachX').addEventListener('click', () => { mark('velomna_coach_seen'); $('coach').hidden = true; });
 // "Start here": the founder could not find step one. Take the newcomer to the first unresolved figure, open its read box, say what to do.
-$('startHere').addEventListener('click', () => {
+$('startHere').addEventListener('click', () => { location.hash = '#/play'; });
+function startHereOld() {
   const card = [...document.querySelectorAll('#figures .figure')].find((c) => !c.classList.contains('done')) || document.querySelector('#figures .figure');
   if (!card) { toast('The night is still forming; try again in a minute.'); return; }
   document.querySelectorAll('#figures .figure').forEach((c) => c.classList.remove('first'));
@@ -286,7 +404,7 @@ $('startHere').addEventListener('click', () => {
   if (!card.querySelector('.choices')) card.querySelectorAll('.inline').forEach((f) => f.classList.toggle('open', f.dataset.mode === 'read'));
   card.scrollIntoView({ behavior: 'smooth', block: 'center' });
   setTimeout(() => (card.querySelector('button[data-choice]:not([disabled])') || card.querySelector('.inline.open input'))?.focus({ preventScroll: true }), 600);
-});
+}
 $('dayBack').addEventListener('click', () => { $('day').classList.remove('open'); });
 
 // ─── morning ───
