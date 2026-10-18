@@ -214,8 +214,8 @@ async function loadPlay() {
   if (!night.scene) { $('playCard').innerHTML = `<div class="eyebrow">the night</div><h2>${esc(night.message || 'The night is forming.')}</h2><p class="quiet">${guest ? 'The first night opens on the cycle. Sign in and leave a seed to wake it.' : 'Leave a seed on the night page; the next night opens on the cycle.'}</p><a class="btn primary" href="#/night">the night page</a>`; setPic($('playImg'), 'ordinary_room'); return; }
   const g = night.scene.genome || {};
   setPic($('playImg'), g.geometry, '100vw', okId(night.scene.picture) ? night.scene.picture : null); setWorld(g.geometry, g.palette?.emotion);
-  // resume where the player was: the first figure not yet settled, unless they are mid-flow
-  if (play.step === 'enter' && night.figures.some((f) => f.resolved_by_me || f.chosen || f.readings_used)) { const k = night.figures.findIndex((f) => !f.resolved_by_me && !f.chosen); play.step = k === -1 ? 'done' : k; }
+  // one tap, then you are answering: land on the first figure that is still open, no welcome card, no scene card
+  if (typeof play.step !== 'number') { const k = night.figures.findIndex((f) => !f.resolved_by_me && !f.chosen); play.step = k === -1 ? 'done' : k; }
   renderPlay();
 }
 function nextFigure() {
@@ -232,23 +232,6 @@ function renderPlay() {
   const n = night.figures.length; const done = night.figures.filter((f) => f.resolved_by_me).length;
   $('playDots').innerHTML = playDots();
   const isBig = night.scene.kind === 'big';
-  if (play.step === 'enter') {
-    c.innerHTML = `<div class="eyebrow"><span class="live"></span><span>night ${night.night}${isBig ? ' · the Big Dream' : ''} · ${PLACE[g.place_label]?.[0] || 'ordinary'}</span></div>
-      <h2>Tonight the world dreams <em>${esc(name)}</em>.</h2>
-      <p class="quiet">${n} figures hide ${n} real things: a person, a fear, a wish, a memory. Pick what each one is. Right answers earn Lucidity.${guest ? ' As a visitor you get three answers tonight.' : ''}</p>
-      <div class="stat"><span>you are <b>${esc(night.me.presence)}</b></span><span>lucidity <b>${night.me.lucidity}</b></span></div>
-      <button class="primary wide" id="pBegin">Begin</button>`;
-    $('pBegin').addEventListener('click', () => { play.step = 'scene'; renderPlay(); });
-    return;
-  }
-  if (play.step === 'scene') {
-    c.innerHTML = `<div class="eyebrow"><span>what you see</span></div>
-      <p class="scene">${esc(night.scene.manifest)}</p>
-      ${g.impossible_detail ? `<p class="note">one impossible detail: ${esc(g.impossible_detail)}</p>` : ''}
-      <button class="primary wide" id="pNext">Meet the first figure</button>`;
-    $('pNext').addEventListener('click', () => { play.step = night.figures.findIndex((f) => !f.resolved_by_me && !f.chosen); if (play.step === -1) play.step = 0; renderPlay(); });
-    return;
-  }
   if (play.step === 'done') {
     const glyph = night.figures.map((f) => f.resolved_by_me ? '<b>\u25c6</b>' : ((f.readings_used || f.chosen) ? '<i>\u25c7</i>' : '\u00b7')).join('');
     const cutIn = night.started_at ? Math.max(0, Math.round((new Date(night.started_at).getTime() + 90 * 60e3 - Date.now()) / 60e3)) : null;
@@ -261,6 +244,7 @@ function renderPlay() {
       : `<p class="quiet">Tomorrow's dream is built from what everyone plants tonight. Leave one thing: a dream you remember, or one true thing from today. Nobody ever reads these words.</p>
         <form class="door" id="pSeed"><textarea placeholder="four words or more" maxlength="2400"></textarea><div class="row"><button class="primary" type="submit">Plant it</button><span class="note" id="pSeedNote">three a night; it enters the next dream</span></div></form>`}
       <div class="go"><button class="small" id="pShare">share tonight</button><a class="btn" href="#/night">explore the full night</a><a class="btn" href="#/">home</a></div>`;
+    play.step = 'done';
     $('pShare').addEventListener('click', shareNight);
     if (guest) wireDoor($('enter4'), '/#/play');
     else $('pSeed').addEventListener('submit', async (ev) => { ev.preventDefault(); const t = ev.target.querySelector('textarea').value.trim(); if (!t) return; const b = ev.target.querySelector('button'); b.disabled = true; try { const r = await api('/seed', { text: t, source: 'dream' }); ev.target.querySelector('textarea').value = ''; $('pSeedNote').textContent = nodash(r.note); } catch (e) { toast(e.message); } b.disabled = false; });
@@ -273,12 +257,13 @@ function renderPlay() {
   const settled = f.resolved_by_me || (r && r.verdict === 'resolved');
   const noMore = guest && night.me.readings_left === 0 && !settled;
   const writtenLeft = Math.max(0, 5 - (f.readings_used || 0));
-  c.innerHTML = `<div class="eyebrow"><span>figure ${play.step + 1} of ${n}</span></div>
+  c.innerHTML = `<div class="eyebrow"><span class="live"></span><span>night ${night.night}${isBig ? ' · the Big Dream' : ''} · ${esc(name)} · figure ${play.step + 1} of ${n}</span></div>
+    <details class="sceneFold"><summary>the scene this figure stands in</summary><p class="scene">${esc(night.scene.manifest)}</p></details>
     <p class="fig">${esc(f.manifest)}</p>
     ${settled ? `<div class="result good">${esc(r ? r.line + ' +' + r.lucidity_delta + ' lucidity.' + (r.origin ? ' Origin: ' + r.origin : '') : 'Resolved by you.')}</div>`
       : noMore ? `<div class="result wrong">Three answers a night as a visitor. Sign in for five per figure and the whole night.</div>`
       : r ? `<div class="result ${r.verdict === 'near' ? '' : 'wrong'}">${esc((r.verdict === 'near' ? 'Near. The idea is right, the core is not. ' : 'Not it. ') + (r.hint ? hintText(r.hint) + '.' : ''))}</div>` : (f.hint ? `<div class="hintline">${esc(hintText(f.hint))}</div>` : '')}
-    ${!settled && !noMore && choices && !f.chosen && !r && !play.writeOpen[f.id] ? `<div class="q">What is this figure really? Pick one.</div><div class="choices">${choices.map((x, i) => `<button type="button" class="choice" data-choice="${i}">${esc(x)}</button>`).join('')}</div>` : ''}
+    ${!settled && !noMore && choices && !f.chosen && !r && !play.writeOpen[f.id] ? `<div class="q">What is this figure really? Pick one.</div>${!seen('velomna_coach_seen') && play.step === 0 ? '<p class="note" style="margin:0">A figure is a disguise for something real: a person, a fear, a wish, a memory. Tap the answer that fits. Wrong costs nothing.</p>' : ''}<div class="choices">${choices.map((x, i) => `<button type="button" class="choice" data-choice="${i}">${esc(x)}</button>`).join('')}</div>` : ''}
     ${!settled && !noMore && writtenLeft > 0 && (!choices || play.writeOpen[f.id]) ? `<form class="door" id="pWrite"><div class="q">${choices ? 'Your own reading, in one sentence (pays double)' : 'What is this figure really? One sentence.'}</div><div class="row"><input type="text" maxlength="300" placeholder="who or what in waking life this stands for"><button class="primary" type="submit">read it</button></div><p class="note">${writtenLeft} written tries left on this figure</p></form>` : ''}
     <div class="go">${settled || r || f.chosen || noMore ? `<button class="primary wide" id="pNext">${play.step + 1 < n ? 'Next figure' : 'Finish the night'}</button>` : (choices && !play.writeOpen[f.id] ? `<button class="small" id="pSkip">skip this one</button>` : `<button class="small" id="pSkip">skip this one</button>`)}
       ${!settled && !noMore && choices && writtenLeft > 0 && !play.writeOpen[f.id] ? `<a class="link" href="#" id="pWriteLink">${f.chosen || r ? 'try your own words instead, pays double' : 'or write your own, pays double'}</a>` : ''}</div>`;
