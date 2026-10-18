@@ -1,29 +1,31 @@
 ---
 name: velomna-engine
-description: Work on VELOMNA, ZeroOrigine's shared-dream game (velomna.zeroorigine.com, Edge Function velomna-api, velomna_* tables on zo-platform, pg_cron nights, Nano WebGL renderer, Tauri desktop shell). Use this for anything about dreams, seeds, the Censor, figures, latents, readings, lucidity, nights, the Big Dream, the board, the painter, guests or visitors, dream-lag, agents dreaming, the oracle threshold, the nano renderer, scene geometries, or the dream game, even when the word VELOMNA is not used. Also use it before touching velomna-api, app.js, nano.js, the velomna migrations or cron jobs.
+description: Work on VELOMNA, ZeroOrigine's shared-dream game: the velomna-api Edge Function, velomna_* tables, nights, the daily Big Dream, the board, the painter, guests, seeds, figures, the catch-and-act play (acts, reactions, dawn), written readings, lucidity, the painted stills, the Nano renderer, cron and deploy. Use for anything about the dream game even when VELOMNA is not named.
 ---
 
-# VELOMNA engine
+# VELOMNA engine (v9, catch and act)
 
-VELOMNA is a shared dream. Dreamers (humans, AI agents, visitors before the door, and "echoes" seeded from public dream reports) leave seeds. Every night a Censor condenses the seeds into one scene with a few figures using Freud's dream-work (condensation, displacement, representability, secondary revision). Each figure hides a latent: what it really is, and which seeds made it. Dreamers act inside the scene (their intent is displaced into something else) and read figures (one sentence guessing the meaning). Only a correct reading earns lucidity. Nothing is predicted about anyone; the game is recognition, not prophecy.
+VELOMNA is a shared dream. Dreamers (humans, AI agents, visitors before the door, and "echoes" seeded from public dream reports) leave seeds. Every night a Censor condenses the seeds into one scene with a few figures using Freud's dream-work (condensation, displacement, representability, secondary revision). Each figure hides a latent: what it really is, and which seeds made it. Nothing is predicted about anyone; the game is recognition, not prophecy.
 
-Founder rulings that shape every decision: bliss over compulsion (no streaks, no loss aversion, no purchasable lucidity, no timers that push); humans and agents have identical rights and byte-identical responses; each dreamer's world grows from their own life (seeds from their nights and days); the machine never reveals a latent until it is resolved; no em dash in anything shown to a player; a visitor can play before signing in and loses nothing by signing in later.
+**The play (since 2026-10-18):** the painted dream fills the screen; the night's figures drift through it as glowing marks that hide and reappear; a dawn clock runs 150 s. Tap a figure, then do ONE of four acts to it: touch, speak to, follow, open. Each figure answers to exactly one act. The right act makes the figure give itself away (two sentences, the second in plain words) and earns lucidity; a wrong act answers with a one-line reaction and the origin hint, costs nothing, and the figure slips away; three wrong and it is gone for that night. Dawn takes nothing. Written readings (one sentence, judged by embedding + oracle) still exist on the night page as "the slow way" and pay double.
+
+Founder rulings that shape every decision: bliss over compulsion (no streaks, no loss aversion, no purchasable lucidity, no timer that costs anything); humans and agents have identical rights and byte-identical responses; each dreamer's world grows from their own life; the machine never reveals a latent until it is resolved; no em dash in anything shown to a player; every place is a picture first and a paragraph second; a visitor can play before signing in and loses nothing by signing in later; **the game is a world, not a quiz** (the founder played the four-choice card version on 2026-10-18 and ruled "a question-answer game, not a game"; never bring back a screen that is a question with answer buttons as the main play); one orange button per screen; no typing anywhere in the play.
 
 ## Where things live
 
 | Part | Location |
 |------|----------|
-| API (the one door) | Edge Function `velomna-api` on zo-platform `opgitcuqwicuiplaptkm`; source `api/velomna-api/index.ts` in repo `ZeroOrigine/zo-velomna` (v7.1 at 2026-10-15 21:20Z) |
-| Data | `velomna_matrices` (one world), `_dreamers` (kind human/agent/echo/guest, `agent_key_hash` also holds a guest's hashed browser key, `operator`), `_seeds` (text, embedding, source dream/day/machine/echo, `codes.lag`, `used_in_night`), `_nights` (status open/cut, kind night/big, `emotion_index`, `big_dream`), `_scenes` (genome, manifest, `picture_id` for a painted Big Dream), `_figures` (manifest, `condensed_from`), `_latents` (meaning, origin_summary, seed_ids, embedding; never served), `_actions` (raw_text, displaced_text, presence), `_readings` (sentence, `similarity` to 3 decimals, verdict wrong/near/resolved/unknown; the first place to look when a verdict is disputed), `_lucidity` (append-only deltas with reason), `_resolutions` (one row per human resolve; the core action); view `velomna_balances` (security_invoker). RLS on, zero policies, privileges revoked from anon/authenticated; `_actions`, `_readings`, `_lucidity`, `_resolutions` carry the refuse-mutation trigger |
-| Schedules | pg_cron job `velomna_night` (`*/15 * * * *` → `/night/run`), `velomna_agents` (`7,22,37,52 * * * *` → `/agents/tick`); header `x-velomna-cron` read from `zo_config.VELOMNA_CRON_SECRET` in SQL |
+| API (the one door) | Edge Function `velomna-api` on zo-platform `opgitcuqwicuiplaptkm`, verify_jwt false; source `api/velomna-api/index.ts` in repo `ZeroOrigine/zo-velomna` (v9, edge fn version 14 at 2026-10-18 22:45Z) |
+| Data | `velomna_matrices`, `_dreamers` (kind human/agent/echo/guest, `agent_key_hash` also holds a guest's hashed browser key, `operator`), `_seeds` (text, embedding, source dream/day/machine/echo, `codes.lag`, `used_in_night`), `_nights` (status open/cut, kind night/big, `emotion_index`, `big_dream`), `_scenes` (genome, manifest, `picture_id`), `_figures` (manifest, `condensed_from`), `_latents` (meaning, origin_summary, seed_ids, embedding, `choices` + `answer_idx` for the four-choice reading, `verb_idx` + `reactions` for the acts; never served except `revealed` after a resolve), `_actions` (free moves: raw_text, displaced_text, presence), `_readings` (sentence, similarity, verdict wrong/near/resolved/unknown, `mode` written/choice/act; for an act the sentence is the verb), `_lucidity` (append-only deltas with reason), `_resolutions` (one row per human resolve); view `velomna_balances`. RLS on, zero policies; `_actions`, `_readings`, `_lucidity`, `_resolutions` carry the refuse-mutation trigger |
+| Schedules | pg_cron `velomna_night` (`*/15 * * * *` → `/night/run`), `velomna_agents` (`7,22,37,52 * * * *` → `/agents/tick`); header `x-velomna-cron` from `zo_config.VELOMNA_CRON_SECRET`, used only inside SQL (`extensions.http`, set `CURLOPT_TIMEOUT_MS` in the same statement batch) |
 | Brakes | `zo_config` `VELOMNA_PAUSE`, `VELOMNA_DAILY_BUDGET_USD` (default 5); 60 s config cache; `spendGate(ledger)` is the ONE gate in front of `claude()`; `/drill/budget-unreadable` proves it fails closed |
-| The Big Dream | `zo_config` `VELOMNA_BIG_DREAM_HOUR` (21) and `VELOMNA_BIG_DREAM_TZ` (America/Toronto); `bigDreamDueNow()` forces a night on the first cron tick inside [hour:00, hour:20) once per local date, idle gate bypassed, `BIG_POOL` 14 seeds; `nextBigAt()` is Intl-based and DST-safe; published as `big` on `/pulse` and `big_dream` on `/health` |
-| The painter | `paintNight()` → Cloudinary Image Generation `POST /v2/generate/{cloud}/text_to_image` (economy, 16:9, 2K, managed asset `velomna/night/<n>`), prompt built from the condensed manifest only; armed only when `CLOUDINARY_API_KEY` + `CLOUDINARY_API_SECRET` + `CLOUDINARY_CLOUD_NAME` exist in `zo_config` (the founder inserts keys himself; a session never sees them); `/health.big_dream.painter` says "armed" or why not; failure lands in the night result as `picture_error`, never fatal |
-| Costs | `zo_cost_logs` rows with `product_slug='velomna'`, `workflow='velomna'`, `mind` = `censor` / `oracle` / `dreamer`; a Cloudinary generation is not in the ledger (free-plan quota, 50 a month) |
-| Site | repo `docs/` published by Netlify site `zo-velomna` (`e6d8d872-5c1c-4870-b47f-da198d28e636`, linked to main, auto-deploy on push, about 20 s) at `https://velomna.zeroorigine.com`; Cloudflare CNAME `velomna` → `zo-velomna.netlify.app`; GitHub Pages from `main:/docs` stays configured as the fallback |
-| Client | `docs/index.html` (v4: hero with tonight's place, "Enter tonight's dream" first, email door second, the Big Dream clock, pulse, how-a-night-works, ten-place gallery, are-you-awake, the board "Tonight's readers", the door again; night/morning/agents/law open on a picture band; night view has the coach, progress glyphs + share, guest door, human-only seed form, what-next box), `docs/app.js` (supabase-js 2.49.1 PKCE, `x-velomna-guest` from localStorage `velomna_guest`, `pic()`/`picId()`/`setPic()`/`setWorld()`, `renderClock()`, `loadBoard()`), `docs/nano.js` (draws only while `body.hole`), `sw.js` (cache `velomna-v5`) |
-| Pictures | one painted still per geometry on Cloudinary cloud `doemifuxr`, public ids `velomna/geo/<geometry>.jpg` (generated once, never from seeds), served as `.../image/upload/f_auto,q_auto:good,c_fill,ar_16:9,w_<W>/<public id>` with srcset 800/1200/1600/2048; a Big Dream's own picture uses the same transform on `scene.picture` (`velomna/night/<n>`), labelled "painted from tonight's dream"; the OG image is a still with `c_fill,w_1200,h_630` |
-| Desktop | `desktop/` Tauri 2 shell pointing at the live site; `.github/workflows/desktop.yml` manual build, unsigned |
+| The Big Dream | `VELOMNA_BIG_DREAM_HOUR` (21) and `VELOMNA_BIG_DREAM_TZ` (America/Toronto); `bigDreamDueNow()` forces a night on the first cron tick inside [hour:00, hour:20) once per local date, idle gate bypassed, `BIG_POOL` 14 seeds; DST-safe `nextBigAt()`; on `/pulse.big` and `/health.big_dream` |
+| The painter | `paintNight()` → Cloudinary Image Generation (economy, 16:9, 2K, managed asset `velomna/night/<n>`), armed only when `CLOUDINARY_API_KEY` + `CLOUDINARY_API_SECRET` + `CLOUDINARY_CLOUD_NAME` exist in `zo_config` (the founder inserts keys himself); `/health.big_dream.painter` says "armed" or why not |
+| Costs | `zo_cost_logs` rows with `product_slug='velomna'`, `mind` = `censor` / `oracle` / `dreamer`. An act costs no model call; the four reactions per figure are made once per scene (`ensureActs`, about $0.001 per figure) |
+| Site | repo `docs/` published by Netlify site `zo-velomna` (`e6d8d872-5c1c-4870-b47f-da198d28e636`, main, about 20 s) at `https://velomna.zeroorigine.com`; Cloudflare CNAME `velomna` → `zo-velomna.netlify.app`; sw cache `velomna-v16`; pushes go from the founder's Mac clone (`/Users/ai2all/Documents/AI Human ecosystem/zo-velomna`) via device_commit_files (always a fresh staged directory) + osascript git |
+| Client | `docs/index.html` section `#v-play` = `.play.world` (`.pic`, `.veil`, `.dawn`, `#stage` with `.fg` sprites, `.playTop` with `#dawnClock`, `#playTitle`, `#hud`, `#sheet`, `#playCard` for the end card); `docs/app.js` PLAY module: `ACTS`, `DAWN_S` 150, `round {on, left, sprites, open, busy}`, `loadPlay()` → `startRound()` → `tick()` (rAF drift, hide/show, dawn opacity, clock paused while `round.open !== null` or the title is on), `catchFigure()` → `renderSheet()` → `doAct()` (POST /act) → `closeSheet()`, `endRound(reason)` → `renderEnd()` (step bar, glyphs, seed chips, "Dream this night again", `loadShelf()`), `hud()`, `playDots()`; night page keeps the written readings; `nano.js`, `sw.js`, `manifest.webmanifest` |
+| Pictures | one painted still per geometry on Cloudinary `doemifuxr`, `velomna/geo/<geometry>.jpg`; a Big Dream's own picture on `scene.picture` (`velomna/night/<n>`); served `f_auto,q_auto:good,c_fill,ar_16:9,w_<W>` with srcset 800/1200/1600/2048 |
+| Hub | `https://games.zeroorigine.com` (repo `ZeroOrigine/zo-games`, Netlify `zo-games`, light theme) lists every `zo_products` row with category `games` and status `live`; card image `zo/games/<slug>` on Cloudinary; VELOMNA's card shows `/pulse` |
 | Registry | `zo_products.velomna` (live, founder-built, games), `zo_projects.zo-velomna`, `zo_product_core_action` → `velomna_resolutions.user_id` |
 | Model | `product_runtime_model` from zo_config (claude-haiku-4-5-20251001 at adoption); embeddings `Supabase.ai.Session('gte-small')` 384-d |
 
@@ -31,69 +33,67 @@ Founder rulings that shape every decision: bliss over compulsion (no streaks, no
 
 | Rule | Value | Where |
 |------|-------|-------|
-| Actions per night | 40 (0 for a guest) | `ACTIONS_PER_NIGHT` |
+| Acts | touch, speak to, follow, open; one right act per figure | `ACT_VERBS`, `velomna_latents.verb_idx` |
+| Wrong acts before a figure is gone for the night | 3 (the fourth verb is never a free pass) | `ACT_TRIES` |
+| Lucidity for a resolve by act | `max(5, 10 + 5*min(3, condensed_from) - 5*wrong_acts_before)` | `actOn()` |
+| Lucidity for a resolve by written reading / by choice | `10 + 10*min(3, condensed_from)` / `10 + 5*min(3, condensed_from)` | `read()` |
+| Dawn (client round) | 150 s, pauses while a sheet is open; nothing is lost; the night can be dreamed again | `DAWN_S` in app.js |
+| Free moves per night | 40 (0 for a guest) | `ACTIONS_PER_NIGHT` |
 | Seeds per night | 3 | `SEEDS_PER_NIGHT` |
-| Readings per figure | 5 | `READINGS_PER_FIGURE` |
-| Guest readings per night | 3, across all figures; act/seed/awake/register answer 403 with the reason | `GUEST_READINGS_PER_NIGHT` |
-| Night length | 90 min, then cut; cron may cut at 85; a cut night can still be read | `NIGHT_MINUTES` |
+| Written readings per figure | 5; a guest gets 3 written readings a night; acts are not capped for a guest (no model call) | `READINGS_PER_FIGURE`, `GUEST_READINGS_PER_NIGHT` |
+| Night length | 90 min, then cut; a cut night can still be played | `NIGHT_MINUTES` |
 | Idle | no human or guest seed or presence in 6 h → cron skips; the Big Dream ignores idle | `IDLE_HOURS`, `idle()` |
-| Big Dream window and pool | first tick inside [hour:00, hour:20); 14 seeds instead of 10 | `BIG_WINDOW_MIN`, `BIG_POOL` |
-| Reading verdict | cosine < 0.80 → `wrong`; ≥ 0.80 → `near`, then the oracle (a strict Claude judge) may promote to `resolved`; judge failure stays `near` (fail closed) | `read()` |
-| Lucidity for a resolve | `10 + 10 * min(3, condensed_from)` (20 to 40) | `read()` |
-| "Are you awake?" | costs 20, refused below 20, refused on your own action | `awake()` |
-| Agents per human | 2, key shown once, `vlm_` prefix, sha256 stored | `registerAgent()` |
-| Agent pace | 8 actions per night per agent, then "rested" | `agentsTick()` |
-| Big dream flag | kind `big` (the daily one) or `abs(emotion_index) >= 0.85` | `runNight()` |
-| Seed pool | fresh human/machine seeds first, echoes fill to 10 (14 on a Big Dream), minimum 3 | `runNight()` |
-| Geometries | ordinary_room, non_euclidean_house, event_horizon_interior, lensed_sky, wormhole_throat, branching_street, backward_hour, deep_ocean, mars_dusk, inside_a_neuron | `GEOMETRIES`, `nano.js GEO`, `app.js GEO_NAMES` |
-| Place labels | observed_physics / hypothesis / ordinary, chosen by the Censor from a fixed mapping | Censor prompt |
+| Reading verdict (written) | cosine < 0.80 → `wrong`; ≥ 0.80 → `near`, then the oracle may promote to `resolved`; judge failure stays `near` | `read()` |
+| "Are you awake?" | costs 20, refused below 20 | `awake()` |
+| Agents | 2 per human, key shown once, `vlm_` prefix, sha256 stored; house agents prefer ACT, READ only when every figure is settled; 8 free moves per night then "rested" | `registerAgent()`, `agentsTick()` |
+| Geometries | ordinary_room, non_euclidean_house, event_horizon_interior, lensed_sky, wormhole_throat, branching_street, backward_hour, deep_ocean, mars_dusk, inside_a_neuron | `GEOMETRIES`, `nano.js GEO`, `app.js GEO_NAMES/GEO_LABEL/GEO_ORDER/HOLES` |
 
 ## Routes
 
 | Route | Auth | Does |
 |-------|------|------|
 | GET `/health` | none | brakes, spend, `big_dream {next_at, hour_local, tz, painter}` |
-| GET `/pulse` | none | public live numbers for the landing page, `kind`, `picture`, `big {next_at, hour_local, tz, open_now}` |
-| GET `/board` | none | tonight's readers: rows {presence, resolved, read} with no kind, totals by kind, all-time lucidity by kind |
-| GET `/observe` | JWT, agent key, or guest key | current night, scene (public genome, `picture`, `kind`), figures with my readings used, feed, my presence, lucidity, `readings_left` for a guest |
-| POST `/seed {text, source:'dream'|'day', lag?}` | JWT or agent | ≥ 4 words, 3 per night, embedded; `codes.lag` is the dreamer's own dream-lag answer |
-| POST `/act {verb, figure, text}` | JWT or agent | intent displaced by the Censor; 503 when paused; 403 for a guest |
-| POST `/read {figure, text}` | any identity | one sentence; verdict wrong/near/resolved; resolve writes lucidity and, for a human's first ever, `velomna_resolutions` + server activation beacon |
+| GET `/pulse` | none | public live numbers, `kind`, `picture`, `big` |
+| GET `/board` | none | tonight's rows {presence, resolved, read} with no kind, totals by kind, all-time lucidity by kind (echoes excluded) |
+| GET `/observe?night=N` | JWT, agent key, or guest key | the night (current or an earlier one), scene (public genome, `picture`, `kind`), figures with `resolved_by_me`, `hint` (after any try), `choices`, `chosen`, `verbs`, `acts {answers, tried, tries_left, gone, revealed}`, feed, me |
+| GET `/nights` | any identity | the shelf: last 12 nights with figures / resolved / touched / open_for_me |
+| POST `/act {figure, verb, night?}` (no text) | any identity, visitors included | THE ACT: verdict resolved/wrong, `reaction`, `lucidity_delta`, `hint`, `tries_left`, `gone`; 409 on a repeat verb, a resolved figure, or a gone figure |
+| POST `/act {verb, figure?, text}` | JWT or agent | a free move: intent displaced by the Censor into the feed |
+| POST `/read {figure, text}` or `{figure, choice}` | any identity | a written reading (5 per figure, double pay) or the one click among four choices |
+| POST `/seed {text, source:'dream'|'day', lag?}` | JWT or agent | ≥ 4 words, 3 per night |
 | POST `/awake {action}` | JWT or agent | reveals the kind behind a presence for 20 lucidity |
-| GET `/me` | any identity | constellation of resolved figures, seeds, lucidity |
-| POST `/agents/register {handle, persona}` | human JWT | second citizen for a person |
-| POST `/night/run?force=1` | `x-velomna-cron` | cut + condense the next night; a due Big Dream forces itself |
-| POST `/agents/tick?force=1` | `x-velomna-cron` | each agent acts or reads once through the public door |
-| GET `/drill/budget-unreadable` | `x-velomna-cron` | D10: runs `spendGate` against a ledger table that does not exist; verdict `ok` only when it refuses with "ledger unreadable"; writes nothing |
+| GET `/me` · POST `/agents/register` | identity / human JWT | constellation; second citizen |
+| POST `/night/run?force=1` · `/agents/tick?force=1` · GET `/drill/budget-unreadable` | `x-velomna-cron` | the cron verbs and the D10 drill |
 
-Identity: humans by the shared Supabase auth (magic link, PKCE); agents by `x-velomna-agent-key`; visitors by `x-velomna-guest` (a 16 to 64 char key the browser made; hash stored as `sha256("guest:"+key)` in `agent_key_hash`, kind `guest`). On a guest's first sign-in the guest row is updated to kind `human` with the user id, so readings and lucidity carry over. All three resolve to a `velomna_dreamers` row and get the same functions.
+Identity: humans by the shared Supabase auth (magic link, PKCE); agents by `x-velomna-agent-key`; visitors by `x-velomna-guest` (hash stored as `sha256("guest:"+key)`). On a guest's first sign-in the guest row becomes the human. All three resolve to a `velomna_dreamers` row and get the same functions.
 
 ## Laws when changing the engine
 
-1. **Latents never leave the door.** `publicGenome()` strips meanings; `/observe` returns figures without `velomna_latents`; a resolve returns `origin_summary` only. Any new route gets the same audit before deploy: grep the response shape for `meaning` and `seed_ids`.
-2. **Lucidity is append-only and earned.** `velomna_lucidity` has the refuse-mutation trigger; balances are a sum. No route may insert a positive delta except a resolve. A wrong reading costs nothing.
-3. **Every model call goes through `claude()`.** It checks pause and budget first and ledgers the cost. A new mind is a new `mind` string in that call, not a new fetch.
-4. **Strip em dashes from model output** before storing or returning; `claude()` already does it on every response (`.replace(/\s*[—–]\s*/g, ", ")`). Night 1 shipped one; the law came from that. Any new text path that bypasses `claude()` must apply the same replace.
-5. **Anonymity by construction.** The Censor prompt forbids names, places, dates; seeds are never quoted verbatim; presences are per-night pseudonyms; the board shows pseudonyms and never a kind per row. Do not add a route that returns another dreamer's raw seed or raw action text.
-6. **Identical responses for humans and agents.** If a change makes a human's `/observe` differ from an agent's, it breaks the Turing premise of "are you awake?". Keep the dreamer type out of the verbs. A guest differs only by its limits (`readings_left`, `actions_left: 0`), never by what it sees.
-7. **Idle means free.** A world nobody human visits costs $0: both cron routes return `skipped` unless a human or guest seeded or was seen in 6 h. Drills use `?force=1`; never remove the idle gate to "make it livelier". The one exception is the daily Big Dream, which is the appointment the world keeps (about $0.008 a day).
-8. **Every string reaching the page passes `nodash()`** in `app.js` (`esc()` calls it; `textContent` sites call it directly). The ledger is append-only, so a dash stored before the API strip existed can only be cured at display time. Keep that gate when adding a render site.
-9. **Adding a geometry is four edits plus one still**: `GEOMETRIES` (API), `GEO` in `nano.js` (camera, hole, disc), `GEO_NAMES` + `GEO_LABEL` + `GEO_ORDER` in `app.js` (add it to `HOLES` only if light bends there), the Censor's place_label mapping, and one painted still uploaded to Cloudinary under `velomna/geo/<geometry>`. One genome, three renderers: the same scene JSON must drive Nano, the stills and any future tier.
-10. **Palettes key on the emotion string by substring** (`PAL` in `nano.js`); unknown emotions fall back to awe. Add a palette, not a special case.
-11. **Echoes are seeds, not players.** Public numbers (`/pulse.figures_resolved`, `/board`) exclude dreamers of kind `echo`; a retired drill dreamer is kind `echo`. A public number that counts a drill is a wrong number.
-12. **A picture is painted from the manifest, never from a seed.** `paintNight()` receives the Censor's manifest (already condensed from at least three seeds, no names). Keep it that way; the law page promises it.
-13. **The clock is a schedule, not a deadline.** The hero clock says when the Big Dream opens and, during it, how long is left; it never says "hurry", never counts to a loss. The law page's "no timers that push you" is what it must keep satisfying.
+1. **Latents never leave the door.** `publicGenome()` strips meanings; `/observe` never returns `meaning`, `seed_ids`, `answer_idx` or `verb_idx`; `revealed` is the resolved figure's own reaction line, only after the dreamer resolved it. Audit any new route's response shape before deploy.
+2. **Lucidity is append-only and earned.** No route may insert a positive delta except a resolve (written, choice or act). A wrong act or reading costs nothing.
+3. **Every model call goes through `claude()`, and `claude()` goes through `spendGate()`.** Acts must stay free of model calls at play time: reactions are precomputed per scene by `ensureActs()`. A new mind is a new `mind` string, not a new fetch.
+4. **Strip em dashes from model output** (`claude()` does it; `ensureActs` repeats it on each reaction). Any new text path that bypasses `claude()` must apply the same replace.
+5. **Anonymity by construction.** The Censor forbids names, places, dates; reactions are written from the figure and its meaning only; presences are per-night pseudonyms.
+6. **Identical responses for humans and agents.** A guest differs only by its limits (`readings_left`, `actions_left: 0`), never by what it sees; a guest may act on figures.
+7. **Idle means free.** Both cron routes return `skipped` unless a human or guest seeded or was seen in 6 h; drills use `?force=1`. The Big Dream is the one exception.
+8. **Every string reaching the page passes `nodash()`.**
+9. **Adding a geometry is four edits plus one still** (`GEOMETRIES`, `nano.js GEO`, `app.js` names/labels/order, the Censor's place_label mapping, one still at `velomna/geo/<geometry>`).
+10. **Palettes key on the emotion string by substring** (`PAL` in `nano.js`).
+11. **Echoes are seeds, not players.** Public numbers exclude kind `echo`.
+12. **A picture is painted from the manifest, never from a seed.**
+13. **The clock is a schedule, not a deadline.** The Big Dream clock and the dawn clock never cost anything; dawn ends a round and offers the same night again. If the law page's wording and the game ever disagree, ask the founder; do not change either silently.
+14. **The play is a world.** `#/play` lands straight in the picture with the figures moving; one tap catches, one tap acts; the end card has exactly one orange button; no text input anywhere in the play.
+15. **A new night must have its acts.** `runNight()` calls `ensureChoices()` and `ensureActs()`; `observe()` and `actOn()` make them lazily for older nights, once per scene per isolate.
 
 ## Deploy and verify
 
-1. Edit `api/velomna-api/index.ts`; deploy with `mcp__Supabase__deploy_edge_function` (`name: velomna-api`, `verify_jwt: false`, full file content; a JSR manifest timeout is transient, retry once). Confirm `verify_jwt` is still false in the result.
-2. From SQL (`extensions.http_get`, the secret via `select value from zo_config`): `GET /health` must show the brake fields and `big_dream`; `/pulse` and `/board` 200. Then run the drills skill (`zo-robustness-drills`), at minimum D1, D6, D7, D8, D10 (the `/drill/budget-unreadable` route), D12, D14, and the guest set G1 to G5.
-3. Site changes: edit `docs/`, bump the cache name in `sw.js`, push to `main` (the Claude GitHub App is installed on ZeroOrigine since 2026-10-15; the Mac path via osascript still works); Netlify builds in about 20 s; verify **in a real browser** on the second load (the first can still serve the old service-worker shell): hero clock visible, board rows equal `/board`, `#/night` renders a scene as a visitor, 0 JS errors, 0 dashes in body text, no horizontal overflow at 390 px. Grep of fetched HTML proves nothing here: the page is client-rendered.
-4. Costs: a night is about $0.006; an agents tick about $0.004 for six agents; a Big Dream about $0.008 plus one Cloudinary generation when armed. If `/health.spent_24h_usd` climbs past $1 with no human presence, something bypassed the idle gate: treat as a finding.
-5. After a Big Dream: `select night, kind, started_at from velomna_nights where kind='big' order by night desc limit 1` must show today's local date in Toronto, and `/pulse.big.open_now` true while it is open.
+1. Edit `api/velomna-api/index.ts`; deploy with `mcp__Supabase__deploy_edge_function` (`name: velomna-api`, `verify_jwt: false`, full file content). Confirm `verify_jwt` is still false afterwards.
+2. From SQL (`extensions.http`, the secret via `select value from zo_config`): `GET /health`, `/pulse`, `/board` 200. As a fresh guest key: `GET /observe` shows `acts.answers true` on every figure; `POST /act` with each verb on one figure walks resolved or wrong → wrong → wrong → `gone`; a free-text /act as a guest is 403. Then the drills skill (`zo-robustness-drills`): at minimum D1, D6, D7, D8, D10, D12, D14 and the guest set.
+3. Site changes: edit `docs/`, bump the cache name in `sw.js`, stage under a fresh `/mnt/user-data/outputs/velomna-vN/` directory, commit to the Mac clone, push; Netlify builds in about 20 s; then Playwright against the production URL on the second load: hero `#enterNow` → `#/play`; `#playTitle` shows the night and fades; four `.fg` sprites whose transforms change; `#dawnClock` counts and stops while `#sheet` is open; a catch shows four `.act` buttons; a wrong act shows a reaction and "tries left"; "leave" and dawn both reach `#playCard` with the step bar and exactly one `.primary` button; 390 px has no horizontal overflow; zero dashes in `document.body.innerText`; no page errors. A full dawn run takes 150 s; run it once in the background.
+4. Costs: a night about $0.006 plus about $0.004 for its acts; an agents tick about $0.004; a Big Dream about $0.008 plus one Cloudinary generation when armed.
 
 ## Open calibration (do not silently "fix")
 
-- The 0.80 cosine threshold with gte-small is a first guess. Agents' honest readings landed at 0.77 to 0.82 on night 1. Collect readings and verdicts for a week before moving it, and move it in config, not code.
-- Dream-lag is measured only from the `codes.lag` answer on morning seeds; there is no inference. Keep it that way until there are enough answers to compare against.
-- The painter is built but unarmed until the founder inserts the Cloudinary keys; voice seeds, sound, a morning ritual prompt and signed desktop binaries are not built. Say so when asked; do not describe them as present.
+- Figures drift slowly and hide briefly on purpose (easy to catch); the founder decides "harder".
+- Agents at written readings still resolve more easily than humans (same model wrote the meaning); their act guesses have human odds. Collect a week of `mode='act'` rows before moving any threshold, and move it in config, not code.
+- The painter is built but unarmed until the founder inserts the Cloudinary keys; voice seeds, sound on catch, a morning ritual prompt and signed desktop binaries are not built. Say so when asked.
