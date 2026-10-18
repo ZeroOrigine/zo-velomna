@@ -229,7 +229,21 @@ body.playing .top{display:none}
 .card .stat b{color:var(--ink);font-weight:500}
 .card .bigglyphs{font-family:var(--font-mono);font-size:34px;letter-spacing:.2em;color:var(--ink-3)}
 .card .bigglyphs b{color:var(--good);font-weight:400}.card .bigglyphs i{color:var(--accent);font-style:normal}
+/* the step bar: 1 Answer, 2 Your night, 3 Plant, 4 Play more */
+.steps{list-style:none;margin:0 0 4px;padding:0;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.steps li{display:grid;gap:4px;padding:8px 0 0;border-top:2px solid var(--line);font-family:var(--font-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);min-width:0}
+.steps li .k{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--line);font-size:10px}
+.steps li.done{border-top-color:var(--good);color:var(--ink-2)}
+.steps li.done .k{border-color:var(--good);color:var(--good)}
+.steps li.now{border-top-color:var(--accent);color:var(--ink)}
+.steps li.now .k{background:var(--accent);border-color:var(--accent);color:#1a1208}
+.steps li .s{grid-column:1/-1;text-transform:none;letter-spacing:.02em;color:var(--accent-2);font-size:11px}
+.steps li .l{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:640px){.steps li .l{display:none}.steps li.now .l{display:block;white-space:normal}}
+.card button.wide{width:100%;padding:15px 20px;font-size:15px}
+.shelf-item .sc{color:var(--accent-2)}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip-btn{border-color:rgba(232,163,90,.5)}
 .chip-btn{font-family:var(--font-display);font-size:15px;letter-spacing:0;padding:9px 14px}
 .shelf{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,150px),1fr));gap:8px}
 .shelf-item{display:grid;gap:3px;text-align:left;border-radius:12px;padding:10px 12px;font-family:var(--font-display);letter-spacing:0;backdrop-filter:none;background:rgba(236,230,216,.04)}
