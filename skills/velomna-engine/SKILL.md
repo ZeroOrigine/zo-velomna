@@ -24,8 +24,9 @@ Founder rulings that shape every decision: bliss over compulsion (no streaks, no
 | Costs | `zo_cost_logs` rows with `product_slug='velomna'`, `mind` = `censor` / `oracle` / `dreamer`. An act costs no model call; the four reactions per figure are made once per scene (`ensureActs`, about $0.001 per figure) |
 | Site | repo `docs/` published by Netlify site `zo-velomna` (`e6d8d872-5c1c-4870-b47f-da198d28e636`, main, about 20 s) at `https://velomna.zeroorigine.com`; Cloudflare CNAME `velomna` → `zo-velomna.netlify.app`; sw cache `velomna-v16`; pushes go from the founder's Mac clone (`/Users/ai2all/Documents/AI Human ecosystem/zo-velomna`) via device_commit_files (always a fresh staged directory) + osascript git |
 | Client | `docs/index.html` section `#v-play` = `.play.world` (`.pic`, `.veil`, `.dawn`, `#stage` with `.fg` sprites, `.playTop` with `#dawnClock`, `#playTitle`, `#hud`, `#sheet`, `#playCard` for the end card); `docs/app.js` PLAY module: `ACTS`, `DAWN_S` 150, `round {on, left, sprites, open, busy}`, `loadPlay()` → `startRound()` → `tick()` (rAF drift, hide/show, dawn opacity, clock paused while `round.open !== null` or the title is on), `catchFigure()` → `renderSheet()` → `doAct()` (POST /act) → `closeSheet()`, `endRound(reason)` → `renderEnd()` (step bar, glyphs, seed chips, "Dream this night again", `loadShelf()`), `hud()`, `playDots()`; night page keeps the written readings; `nano.js`, `sw.js`, `manifest.webmanifest` |
-| Pictures | one painted still per geometry on Cloudinary `doemifuxr`, `velomna/geo/<geometry>.jpg`; a Big Dream's own picture on `scene.picture` (`velomna/night/<n>`); served `f_auto,q_auto:good,c_fill,ar_16:9,w_<W>` with srcset 800/1200/1600/2048 |
+| Pictures | one painted still per geometry on Cloudinary `doemifuxr`, `velomna/geo/<geometry>.jpg`, generated once on 2026-10-15 (never from seeds); a Big Dream's own picture on `scene.picture` (`velomna/night/<n>`); served `f_auto,q_auto:good,c_fill,ar_16:9,w_<W>` with srcset 800/1200/1600/2048; the OG image is a still with `c_fill,w_1200,h_630`. A new geometry needs a new still under the same public id scheme (Cloudinary MCP `generate-image`, economy costs 1 of the 50 monthly generations) |
 | Hub | `https://games.zeroorigine.com` (repo `ZeroOrigine/zo-games`, Netlify `zo-games`, light theme) lists every `zo_products` row with category `games` and status `live`; card image `zo/games/<slug>` on Cloudinary; VELOMNA's card shows `/pulse` |
+| Desktop | `desktop/` Tauri 2 shell pointing at the live site; `.github/workflows/desktop.yml` manual build, unsigned |
 | Registry | `zo_products.velomna` (live, founder-built, games), `zo_projects.zo-velomna`, `zo_product_core_action` → `velomna_resolutions.user_id` |
 | Model | `product_runtime_model` from zo_config (claude-haiku-4-5-20251001 at adoption); embeddings `Supabase.ai.Session('gte-small')` 384-d |
 
@@ -46,7 +47,10 @@ Founder rulings that shape every decision: bliss over compulsion (no streaks, no
 | Reading verdict (written) | cosine < 0.80 → `wrong`; ≥ 0.80 → `near`, then the oracle may promote to `resolved`; judge failure stays `near` | `read()` |
 | "Are you awake?" | costs 20, refused below 20 | `awake()` |
 | Agents | 2 per human, key shown once, `vlm_` prefix, sha256 stored; house agents prefer ACT, READ only when every figure is settled; 8 free moves per night then "rested" | `registerAgent()`, `agentsTick()` |
+| Big Dream window and pool; big flag | first tick inside [hour:00, hour:20); 14 seeds instead of 10; kind `big` or `abs(emotion_index) >= 0.85` | `BIG_WINDOW_MIN`, `BIG_POOL`, `runNight()` |
+| Seed pool | fresh human/machine seeds first, echoes fill to 10 (14 on a Big Dream), minimum 3 | `runNight()` |
 | Geometries | ordinary_room, non_euclidean_house, event_horizon_interior, lensed_sky, wormhole_throat, branching_street, backward_hour, deep_ocean, mars_dusk, inside_a_neuron | `GEOMETRIES`, `nano.js GEO`, `app.js GEO_NAMES/GEO_LABEL/GEO_ORDER/HOLES` |
+| Place labels | observed_physics / hypothesis / ordinary, chosen by the Censor from a fixed mapping | Censor prompt |
 
 ## Routes
 
@@ -90,10 +94,12 @@ Identity: humans by the shared Supabase auth (magic link, PKCE); agents by `x-ve
 1. Edit `api/velomna-api/index.ts`; deploy with `mcp__Supabase__deploy_edge_function` (`name: velomna-api`, `verify_jwt: false`, full file content). Confirm `verify_jwt` is still false afterwards.
 2. From SQL (`extensions.http`, the secret via `select value from zo_config`): `GET /health`, `/pulse`, `/board` 200. As a fresh guest key: `GET /observe` shows `acts.answers true` on every figure; `POST /act` with each verb on one figure walks resolved or wrong → wrong → wrong → `gone`; a free-text /act as a guest is 403. Then the drills skill (`zo-robustness-drills`): at minimum D1, D6, D7, D8, D10, D12, D14 and the guest set.
 3. Site changes: edit `docs/`, bump the cache name in `sw.js`, stage under a fresh `/mnt/user-data/outputs/velomna-vN/` directory, commit to the Mac clone, push; Netlify builds in about 20 s; then Playwright against the production URL on the second load: hero `#enterNow` → `#/play`; `#playTitle` shows the night and fades; four `.fg` sprites whose transforms change; `#dawnClock` counts and stops while `#sheet` is open; a catch shows four `.act` buttons; a wrong act shows a reaction and "tries left"; "leave" and dawn both reach `#playCard` with the step bar and exactly one `.primary` button; 390 px has no horizontal overflow; zero dashes in `document.body.innerText`; no page errors. A full dawn run takes 150 s; run it once in the background.
-4. Costs: a night about $0.006 plus about $0.004 for its acts; an agents tick about $0.004; a Big Dream about $0.008 plus one Cloudinary generation when armed.
+4. Costs: a night about $0.006 plus about $0.004 for its acts; an agents tick about $0.004; a Big Dream about $0.008 plus one Cloudinary generation when armed. If `/health.spent_24h_usd` climbs past $1 with no human presence, something bypassed the idle gate: treat as a finding.
+5. After a Big Dream: `select night, kind, started_at from velomna_nights where kind='big' order by night desc limit 1` must show today's local date in Toronto, and `/pulse.big.open_now` true while it is open.
 
 ## Open calibration (do not silently "fix")
 
 - Figures drift slowly and hide briefly on purpose (easy to catch); the founder decides "harder".
 - Agents at written readings still resolve more easily than humans (same model wrote the meaning); their act guesses have human odds. Collect a week of `mode='act'` rows before moving any threshold, and move it in config, not code.
-- The painter is built but unarmed until the founder inserts the Cloudinary keys; voice seeds, sound on catch, a morning ritual prompt and signed desktop binaries are not built. Say so when asked.
+- The 0.80 cosine threshold with gte-small is a first guess; dream-lag is measured only from the `codes.lag` answer on morning seeds, no inference.
+- The painter is built but unarmed until the founder inserts the Cloudinary keys; voice seeds, sound on catch, a morning ritual prompt and signed desktop binaries are not built. Say so when asked; do not describe them as present.
