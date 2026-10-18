@@ -10,6 +10,7 @@ const sb = createClient(SUPABASE_URL, ANON, { auth: { flowType: 'pkce', detectSe
 const $ = (id) => document.getElementById(id);
 // the display gate: nothing reaches the page with an em or en dash, whatever the ledger holds (law since night 1)
 const nodash = (s) => String(s ?? '').replace(/\s*[\u2014\u2013]\s*/g, ', ');
+const hintText = (h) => { const t = String(h ?? '').replace(/[.\s]+$/, '').replace(/,?\s*no names$/i, '').replace(/[.\s]+$/, ''); return t.charAt(0).toUpperCase() + t.slice(1); };
 const esc = (s) => nodash(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // ─── the ten places: one genome, three renderers (Nano shader, the painted still, the label) ───
@@ -201,7 +202,7 @@ async function shareNight() {
 }
 
 // ─── PLAY: the game as cards. One screen, one question, one tap, next. Same data, same door. ───
-const play = { step: 'enter', i: 0, results: {} };
+const play = { step: 'enter', i: 0, results: {}, writeOpen: {} };
 function playDots() {
   if (!night?.figures) return '';
   return night.figures.map((f, i) => f.resolved_by_me ? '<i>\u25c6</i>' : (play.step === i ? '<b>\u25cf</b>' : ((f.readings_used || f.chosen) ? '\u25c7' : '\u00b7'))).join('');
@@ -276,26 +277,20 @@ function renderPlay() {
     <p class="fig">${esc(f.manifest)}</p>
     ${settled ? `<div class="result good">${esc(r ? r.line + ' +' + r.lucidity_delta + ' lucidity.' + (r.origin ? ' Origin: ' + r.origin : '') : 'Resolved by you.')}</div>`
       : noMore ? `<div class="result wrong">Three answers a night as a visitor. Sign in for five per figure and the whole night.</div>`
-      : r ? `<div class="result ${r.verdict === 'near' ? '' : 'wrong'}">${esc((r.verdict === 'near' ? 'Near. The idea is right, the core is not. ' : 'Not it. ') + (r.hint ? 'Hint: ' + String(r.hint).replace(/[.\s]+$/, '') + '.' : ''))}</div>` : (f.hint ? `<div class="hintline">hint: ${esc(f.hint)}</div>` : '')}
-    ${!settled && !noMore && choices && !f.chosen && !r ? `<div class="q">What is this figure really? Pick one.</div><div class="choices">${choices.map((x, i) => `<button type="button" class="choice" data-choice="${i}">${esc(x)}</button>`).join('')}</div>
-      <p class="note">One click per figure. Or <a class="link" href="#" id="pWriteLink">write your own</a>: it pays double.</p>` : ''}
-    ${!settled && !noMore && (f.chosen || r || !choices) && writtenLeft > 0 ? `<form class="door" id="pWrite"><div class="q">${choices ? 'Your own reading, in one sentence (pays double)' : 'What is this figure really? One sentence.'}</div><div class="row"><input type="text" maxlength="300" placeholder="who or what in waking life this stands for"><button class="primary" type="submit">read it</button></div><p class="note">${writtenLeft} written tries left on this figure</p></form>` : ''}
-    <div class="go">${settled || r || f.chosen || noMore ? `<button class="primary wide" id="pNext">${play.step + 1 < n ? 'Next figure' : 'Finish the night'}</button>` : `<button class="small" id="pSkip">skip this one</button>`}</div>`;
+      : r ? `<div class="result ${r.verdict === 'near' ? '' : 'wrong'}">${esc((r.verdict === 'near' ? 'Near. The idea is right, the core is not. ' : 'Not it. ') + (r.hint ? hintText(r.hint) + '.' : ''))}</div>` : (f.hint ? `<div class="hintline">${esc(hintText(f.hint))}</div>` : '')}
+    ${!settled && !noMore && choices && !f.chosen && !r && !play.writeOpen[f.id] ? `<div class="q">What is this figure really? Pick one.</div><div class="choices">${choices.map((x, i) => `<button type="button" class="choice" data-choice="${i}">${esc(x)}</button>`).join('')}</div>` : ''}
+    ${!settled && !noMore && writtenLeft > 0 && (!choices || play.writeOpen[f.id]) ? `<form class="door" id="pWrite"><div class="q">${choices ? 'Your own reading, in one sentence (pays double)' : 'What is this figure really? One sentence.'}</div><div class="row"><input type="text" maxlength="300" placeholder="who or what in waking life this stands for"><button class="primary" type="submit">read it</button></div><p class="note">${writtenLeft} written tries left on this figure</p></form>` : ''}
+    <div class="go">${settled || r || f.chosen || noMore ? `<button class="primary wide" id="pNext">${play.step + 1 < n ? 'Next figure' : 'Finish the night'}</button>` : (choices && !play.writeOpen[f.id] ? `<button class="small" id="pSkip">skip this one</button>` : `<button class="small" id="pSkip">skip this one</button>`)}
+      ${!settled && !noMore && choices && writtenLeft > 0 && !play.writeOpen[f.id] ? `<a class="link" href="#" id="pWriteLink">${f.chosen || r ? 'try your own words instead, pays double' : 'or write your own, pays double'}</a>` : ''}</div>`;
   c.querySelectorAll('button[data-choice]').forEach((b) => b.addEventListener('click', async () => {
     c.querySelectorAll('button[data-choice]').forEach((x) => { x.disabled = true; });
     try { const res = await api('/read', { figure: f.id, choice: Number(b.dataset.choice) }); play.results[f.id] = res; if (res.verdict === 'resolved') mark('velomna_coach_seen'); night = await api('/observe'); renderPlay(); }
     catch (e) { toast(e.message); night = await api('/observe'); renderPlay(); }
   }));
-  const wl = $('pWriteLink'); if (wl) wl.addEventListener('click', (ev) => { ev.preventDefault(); play.results[f.id] = play.results[f.id] || { verdict: 'open', line: '' }; c.querySelector('.choices')?.remove(); c.querySelector('.q')?.remove(); wl.closest('p')?.remove(); renderPlayWriteBox(c, f, writtenLeft); });
+  const wl = $('pWriteLink'); if (wl) wl.addEventListener('click', (ev) => { ev.preventDefault(); play.writeOpen[f.id] = true; renderPlay(); $('pWrite')?.querySelector('input')?.focus(); });
   const wf = $('pWrite'); if (wf) wireWrite(wf, f);
   const nx = $('pNext'); if (nx) nx.addEventListener('click', nextFigure);
   const sk = $('pSkip'); if (sk) sk.addEventListener('click', nextFigure);
-}
-function renderPlayWriteBox(c, f, writtenLeft) {
-  const form = document.createElement('form'); form.className = 'door'; form.id = 'pWrite';
-  form.innerHTML = `<div class="q">Your own reading, in one sentence (pays double)</div><div class="row"><input type="text" maxlength="300" placeholder="who or what in waking life this stands for"><button class="primary" type="submit">read it</button></div><p class="note">${writtenLeft} written tries left on this figure</p>`;
-  c.querySelector('.go').before(form); wireWrite(form, f); form.querySelector('input').focus();
-  const go = c.querySelector('.go'); go.innerHTML = `<button class="small" id="pSkip">skip this one</button>`; $('pSkip').addEventListener('click', nextFigure);
 }
 function wireWrite(form, f) {
   form.addEventListener('submit', async (ev) => {
@@ -322,7 +317,7 @@ function renderFigures() {
     <div class="figure${f.resolved_by_me ? ' done' : ''}" data-id="${f.id}">
       <div class="text">${esc(f.manifest)}</div>
       <div class="note">made from ${f.condensed_from} seeds${f.resolved_by_me ? ' · <span style="color:var(--good)">resolved by you</span>' : (f.chosen ? ' · your click is spent' : '')}${f.readings_used ? ` · written tries used ${f.readings_used} of 5` : ''}</div>
-      ${f.hint && !f.resolved_by_me ? `<div class="hintline">hint: ${esc(f.hint)}</div>` : ''}
+      ${f.hint && !f.resolved_by_me ? `<div class="hintline">hint: ${esc(hintText(f.hint))}</div>` : ''}
       ${f.resolved_by_me ? '' : choices ? `
       <div class="q">${f.chosen ? 'Your click is spent. Write your own below; it pays double.' : 'What is this figure really? Pick one.'}</div>
       <div class="choices">${choices.map((c, i) => `<button type="button" class="choice${f.chosen && f.chosen.idx === i ? (f.chosen.verdict === 'resolved' ? ' picked right' : ' picked wrong') : ''}" data-choice="${i}" ${f.chosen ? 'disabled' : ''}>${esc(c)}</button>`).join('')}</div>` : ''}
@@ -342,7 +337,7 @@ function renderFigures() {
     try {
       const r = await api('/read', { figure: id, choice: Number(b.dataset.choice) });
       if (r.verdict === 'resolved') { log(r.line + ' +' + r.lucidity_delta + ' lucidity. ' + (r.origin ? 'Origin: ' + r.origin : '') + (guest ? ' Sign in below and it stays yours.' : ''), 'good'); mark('velomna_coach_seen'); }
-      else log('Not it. ' + (r.hint ? 'Hint: ' + String(r.hint).replace(/[.\s]+$/, '') + '. ' : '') + 'Write your own reading under the figure; a written resolve pays double.', 'wrong');
+      else log('Not it. ' + (r.hint ? 'Hint: ' + hintText(r.hint) + '. ' : '') + 'Write your own reading under the figure; a written resolve pays double.', 'wrong');
       await loadNight();
       if (r.verdict !== 'resolved') { const c = document.querySelector(`.figure[data-id="${id}"]`); c?.scrollIntoView({ behavior: 'smooth', block: 'center' }); c?.querySelector('.inline.open input')?.focus({ preventScroll: true }); }
     } catch (e) { toast(e.message); await loadNight(); }
@@ -367,7 +362,7 @@ function renderFigures() {
       else {
         const r = await api('/read', { figure: id, text });
         if (r.verdict === 'resolved') { log(r.line + ' +' + r.lucidity_delta + ' lucidity. ' + (r.origin ? 'Origin: ' + r.origin : '') + (guest ? ' Sign in below and it stays yours.' : ''), 'good'); mark('velomna_coach_seen'); }
-        else log((r.verdict === 'near' ? 'Near. The idea is right, the core is not. ' : 'Not it. ') + r.line + (r.hint ? ' Hint: ' + String(r.hint).replace(/[.\s]+$/, '') + '.' : '') + (r.readings_left !== undefined ? ` ${r.readings_left} written tries left on this figure.` : ''), r.verdict === 'near' ? '' : 'wrong');
+        else log((r.verdict === 'near' ? 'Near. The idea is right, the core is not. ' : 'Not it. ') + r.line + (r.hint ? ' Hint: ' + hintText(r.hint) + '.' : '') + (r.readings_left !== undefined ? ` ${r.readings_left} written tries left on this figure.` : ''), r.verdict === 'near' ? '' : 'wrong');
       }
       f.querySelector('input').value = ''; f.classList.remove('open');
       await loadNight();
