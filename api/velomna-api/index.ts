@@ -1,4 +1,4 @@
-// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v8 (read by click: four options per figure, writing pays double): the Big Dream at a fixed local hour every day, painted when Cloudinary keys exist; a public board; v6 guests kept.
+// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v8.1 (earlier dreams stay playable; seeds by tap): the Big Dream at a fixed local hour every day, painted when Cloudinary keys exist; a public board; v6 guests kept.
 // Humans (Supabase JWT) and agents (x-velomna-agent-key) get byte-identical responses.
 // Nothing below this door ever returns a latent. Costs are ledgered in zo_cost_logs.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -166,6 +166,16 @@ async function currentNight(matrixId: string) {
   const { data } = await admin.from("velomna_nights").select("*").eq("matrix_id", matrixId).order("night", { ascending: false }).limit(1).maybeSingle();
   return data;
 }
+async function nightByNo(matrixId: string, no: number) {
+  const { data } = await admin.from("velomna_nights").select("*").eq("matrix_id", matrixId).eq("night", no).maybeSingle();
+  return data;
+}
+// which night a request means: ?night=N (or body.night) for an earlier dream, else the current one
+async function pickNight(matrixId: string, wanted: unknown) {
+  const no = Number(wanted);
+  if (Number.isInteger(no) && no > 0) return await nightByNo(matrixId, no);
+  return await currentNight(matrixId);
+}
 async function sceneOf(matrixId: string, night: number) {
   const { data } = await admin.from("velomna_scenes").select("*").eq("matrix_id", matrixId).eq("night", night).maybeSingle();
   return data;
@@ -184,8 +194,8 @@ function publicGenome(g: Record<string, unknown>) {
 }
 
 // ───────────── the verbs ─────────────
-async function observe(d: Dreamer) {
-  const night = await currentNight(d.matrix_id);
+async function observe(d: Dreamer, wanted: unknown = null) {
+  const night = await pickNight(d.matrix_id, wanted);
   if (!night) return { night: null, message: "The world has not dreamed yet. Leave a seed; the first night opens on the next cycle." };
   const scene = await sceneOf(d.matrix_id, night.night);
   if (!scene) return { night: night.night, message: "The night is forming." };
@@ -271,8 +281,8 @@ const WARPS = ["The figure turns the reading over and hands it back folded. The 
 const WARMS = ["Something in the scene leans toward you. Not yet.", "The figure holds still, which it has not done before.",
   "You are warm. The reading is the right shape and the wrong size.", "A corner of the room comes into focus and stays."];
 
-async function read(d: Dreamer, figureId: string, sentence: string, choice: unknown = null) {
-  const night = await currentNight(d.matrix_id);
+async function read(d: Dreamer, figureId: string, sentence: string, choice: unknown = null, wanted: unknown = null) {
+  const night = await pickNight(d.matrix_id, wanted);
   if (!night) return json({ error: "the world has not dreamed yet" }, 409);
   const scene = await sceneOf(d.matrix_id, night.night);
   if (!scene) return json({ error: "the night is forming" }, 409);
@@ -368,6 +378,23 @@ async function awake(d: Dreamer, actionId: string) {
   return json({ presence: a.presence, kind: other?.kind, lucidity: bal - 20 });
 }
 
+// the shelf: the last nights, with how many figures this dreamer resolved in each, so an earlier dream can be played after tonight's
+async function nights(d: Dreamer) {
+  const { data: ns } = await admin.from("velomna_nights").select("night, kind, status, started_at").eq("matrix_id", d.matrix_id).order("night", { ascending: false }).limit(12);
+  const nos = (ns ?? []).map((x) => x.night);
+  const { data: scenes } = nos.length ? await admin.from("velomna_scenes").select("id, night, genome").eq("matrix_id", d.matrix_id).in("night", nos) : { data: [] };
+  const sceneIds = (scenes ?? []).map((x) => x.id);
+  const { data: figs } = sceneIds.length ? await admin.from("velomna_figures").select("id, scene_id").in("scene_id", sceneIds) : { data: [] };
+  const { data: mine } = sceneIds.length ? await admin.from("velomna_readings").select("figure_id, scene_id, verdict, mode").eq("dreamer_id", d.id).in("scene_id", sceneIds) : { data: [] };
+  return { nights: (ns ?? []).map((x) => {
+    const sc = (scenes ?? []).find((y) => y.night === x.night);
+    const fids = (figs ?? []).filter((f) => f.scene_id === sc?.id).map((f) => f.id);
+    const myReads = (mine ?? []).filter((r) => r.scene_id === sc?.id);
+    const resolved = new Set(myReads.filter((r) => r.verdict === "resolved").map((r) => r.figure_id)).size;
+    const touched = new Set(myReads.map((r) => r.figure_id)).size;
+    return { night: x.night, kind: x.kind, status: x.status, started_at: x.started_at, geometry: sc?.genome?.geometry ?? null, figures: fids.length, resolved, touched, open_for_me: fids.length - touched };
+  }) };
+}
 async function me(d: Dreamer) {
   const { data: res } = await admin.from("velomna_readings").select("figure_id, verdict, created_at").eq("dreamer_id", d.id).eq("verdict", "resolved").order("created_at");
   const { count: seeds } = await admin.from("velomna_seeds").select("id", { count: "exact", head: true }).eq("dreamer_id", d.id);
@@ -609,7 +636,7 @@ Deno.serve(async (req) => {
     if (path === "/health") { const b = await budgetLeft(); const nb = await nextBigAt(); return json({ ok: true, product: SLUG, at: new Date().toISOString(), paused: await paused(), spent_24h_usd: isNaN(b.spent) ? null : Math.round(b.spent * 1000) / 1000, daily_cap_usd: b.cap, big_dream: { next_at: nb.at.toISOString(), hour_local: nb.hour, tz: nb.tz, painter: await painterArmed() } }); }
     if (path === "/pulse") return json(await pulse());
     if (path === "/board") return json(await board());
-    if (path.startsWith("/night") || path === "/agents/tick") {
+    if (path.startsWith("/night/") || path === "/agents/tick") { // "/night/run" is cron-only; "/nights" (the shelf) is a player route
       const secret = await cfg("VELOMNA_CRON_SECRET");
       if (!secret || req.headers.get("x-velomna-cron") !== secret) return json({ error: "refused" }, 401);
       if (path === "/night/run") return json(await runNight(url.searchParams.get("force") === "1"));
@@ -630,12 +657,13 @@ Deno.serve(async (req) => {
     if (!d) return json({ error: "sign in (magic link), send x-velomna-agent-key, or x-velomna-guest to read as a visitor" }, 401);
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     if (d.kind === "guest" && ["/act", "/seed", "/awake", "/agents/register"].includes(path)) return json({ error: "sign in for that: a visitor can look and read; acting, planting a seed and asking who is awake need the door", guest: true }, 403);
-    if (path === "/observe") return json(await observe(d));
+    if (path === "/observe") return json(await observe(d, url.searchParams.get("night")));
+    if (path === "/nights") return json(await nights(d));
     if (path === "/me") return json(await me(d));
     if (path === "/seed" && req.method === "POST") return await seed(d, body.text, body.source, "lag" in body ? body.lag : null);
     if ((path === "/act" || path === "/read") && (await paused())) return json({ error: "the world is paused by its keeper; seeds are still kept" }, 503);
     if (path === "/act" && req.method === "POST") return await act(d, body.verb, body.figure ?? null, body.text);
-    if (path === "/read" && req.method === "POST") return await read(d, body.figure, body.text, "choice" in body ? body.choice : null);
+    if (path === "/read" && req.method === "POST") return await read(d, body.figure, body.text, "choice" in body ? body.choice : null, body.night ?? null);
     if (path === "/awake" && req.method === "POST") return await awake(d, body.action);
     if (path === "/agents/register" && req.method === "POST") return await registerAgent(d, body.handle, body.persona);
     return json({ error: "not found" }, 404);
