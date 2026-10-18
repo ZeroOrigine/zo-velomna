@@ -1,4 +1,4 @@
-// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v8.1 (earlier dreams stay playable; seeds by tap): the Big Dream at a fixed local hour every day, painted when Cloudinary keys exist; a public board; v6 guests kept.
+// VELOMNA · the one door. Adopted, founder-built, 2026-10-15. v9 (catch and act: each figure answers to one of four acts; POST /act {figure, verb} is the game, open to visitors; agents play the same way). v8.1 kept: earlier dreams stay playable, seeds by tap, the Big Dream, the board, guests.
 // Humans (Supabase JWT) and agents (x-velomna-agent-key) get byte-identical responses.
 // Nothing below this door ever returns a latent. Costs are ledgered in zo_cost_logs.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -10,7 +10,8 @@ const admin = createClient(SUPABASE_URL, SRK, { auth: { persistSession: false } 
 const SLUG = "velomna";
 const ACTIONS_PER_NIGHT = 40;
 const READINGS_PER_FIGURE = 5; // written readings per figure; a click is one per figure
-const ACT_VERBS = ["touch", "speak to", "follow", "open"]; // the four click-verbs; free text is still allowed
+const ACT_VERBS = ["touch", "speak to", "follow", "open"]; // the four acts; each figure answers to exactly one of them
+const ACT_TRIES = 3; // wrong acts before a figure is gone for the night (four verbs, three tries: the last verb is never a free pass)
 const SEEDS_PER_NIGHT = 3;
 const GUEST_READINGS_PER_NIGHT = 3; // a visitor can read three figures a night before the door
 const NIGHT_MINUTES = 90;
@@ -203,10 +204,13 @@ async function observe(d: Dreamer, wanted: unknown = null) {
   const { data: mine } = await admin.from("velomna_readings").select("figure_id, verdict, mode, sentence").eq("dreamer_id", d.id).eq("scene_id", scene.id);
   // the hint: after one miss on a figure, its origin theme ("made from 3 dreams about waiting") is shown. Theme only; the meaning and the seeds stay hidden.
   // the choices: four plain-word readings per figure, made once; the true index never leaves the door.
-  let { data: lats } = await admin.from("velomna_latents").select("figure_id, origin_summary, choices").eq("scene_id", scene.id);
-  if (!choicesTried.has(scene.id) && (lats ?? []).some((l) => !Array.isArray(l.choices))) { choicesTried.add(scene.id); await ensureChoices(scene.id); lats = (await admin.from("velomna_latents").select("figure_id, origin_summary, choices").eq("scene_id", scene.id)).data; }
-  const hintOf: Record<string, string> = {}; const choicesOf: Record<string, string[] | null> = {};
-  for (const h of lats ?? []) { hintOf[h.figure_id] = h.origin_summary; choicesOf[h.figure_id] = Array.isArray(h.choices) ? h.choices : null; }
+  // the acts: each figure answers to one of the four; made once per scene. The right verb and the lines never leave the door until acted on.
+  const LAT = "figure_id, origin_summary, choices, reactions, verb_idx";
+  let { data: lats } = await admin.from("velomna_latents").select(LAT).eq("scene_id", scene.id);
+  if (!choicesTried.has(scene.id) && (lats ?? []).some((l) => !Array.isArray(l.choices))) { choicesTried.add(scene.id); await ensureChoices(scene.id); lats = (await admin.from("velomna_latents").select(LAT).eq("scene_id", scene.id)).data; }
+  if (!actsTried.has(scene.id) && (lats ?? []).some((l) => !Array.isArray(l.reactions))) { actsTried.add(scene.id); await ensureActs(scene.id); lats = (await admin.from("velomna_latents").select(LAT).eq("scene_id", scene.id)).data; }
+  const hintOf: Record<string, string> = {}; const choicesOf: Record<string, string[] | null> = {}; const latOf: Record<string, any> = {};
+  for (const h of lats ?? []) { hintOf[h.figure_id] = h.origin_summary; choicesOf[h.figure_id] = Array.isArray(h.choices) ? h.choices : null; latOf[h.figure_id] = h; }
   const { data: feed } = await admin.from("velomna_actions").select("id, presence, verb, displaced_text, created_at")
     .eq("scene_id", scene.id).order("created_at", { ascending: false }).limit(30);
   const used = await actionsTonight(d.id, scene.id);
@@ -222,6 +226,16 @@ async function observe(d: Dreamer, wanted: unknown = null) {
       // the click already spent on this figure, if any: which option and how it went
       chosen: (() => { const c = (mine ?? []).find((r) => r.figure_id === f.id && r.mode === "choice"); if (!c) return null; const idx = (choicesOf[f.id] ?? []).indexOf(c.sentence); return { idx, verdict: c.verdict }; })(),
       verbs: ACT_VERBS,
+      // catch and act: which acts this dreamer already tried on the figure, whether it is gone, and the line it gave away once resolved by an act
+      acts: (() => {
+        const rows = (mine ?? []).filter((r) => r.figure_id === f.id && r.mode === "act");
+        const tried = rows.map((r) => ACT_VERBS.indexOf(r.sentence)).filter((i) => i >= 0);
+        const resolved = rows.find((r) => r.verdict === "resolved");
+        const lat = latOf[f.id];
+        const answers = Array.isArray(lat?.reactions) && Number.isInteger(lat?.verb_idx);
+        return { answers, tried, tries_left: Math.max(0, ACT_TRIES - tried.filter((i) => i !== lat?.verb_idx).length), gone: !resolved && tried.length >= ACT_TRIES,
+          revealed: resolved && answers ? String(lat.reactions[lat.verb_idx]) : null };
+      })(),
     })),
     feed: feed ?? [],
     me: { kind: d.kind, presence: await presenceOf(d.id, night.night), lucidity: await balance(d.id), actions_left: d.kind === "guest" ? 0 : Math.max(0, ACTIONS_PER_NIGHT - used),
@@ -365,6 +379,64 @@ async function ensureChoices(sceneId: string) {
       await admin.from("velomna_latents").update({ choices, answer_idx: idx }).eq("figure_id", l.figure_id);
     } catch (_) { /* a figure without choices can still be read by writing */ }
   }
+}
+
+// ───────────── catch and act: a figure answers to ONE of the four acts ─────────────
+// Made once per scene and stored in the latent: the verb that fits what the figure really is, and four lines, one per act.
+// The right act's line gives the figure away and ends by saying what it is in plain words; the other three refuse with a hint.
+const actsTried = new Set<string>();
+async function ensureActs(sceneId: string) {
+  const { data: lats } = await admin.from("velomna_latents").select("figure_id, meaning, reactions, verb_idx").eq("scene_id", sceneId);
+  for (const l of lats ?? []) {
+    if (Array.isArray(l.reactions) && l.reactions.length === 4 && Number.isInteger(l.verb_idx)) continue;
+    const { data: fig } = await admin.from("velomna_figures").select("manifest").eq("id", l.figure_id).maybeSingle();
+    try {
+      const j = parseJson(await claude("censor",
+        `A dream figure hides one meaning. A dreamer can do ONE of four acts to it: touch, speak to, follow, open. Choose the one act that would make THIS figure give itself away: the act that fits what it really is (a door or a box is opened, a road or a sound is followed, a person or a voice is spoken to, a thing or a body is touched). Choose by the hidden meaning first, the surface second. Then write four reactions, one per act, second person, present tense, no names, no dream jargon, no dashes. For the chosen act: two sentences, 25 to 45 words; the figure gives itself away and the second sentence says in plain everyday words what it really is. For each other act: one sentence, 12 to 24 words; the figure refuses, slips away or changes, in a way that quietly hints at what it is without saying it. Output strict JSON: {"act":"touch"|"speak to"|"follow"|"open","reactions":{"touch":"...","speak to":"...","follow":"...","open":"..."}}`,
+        `FIGURE AS SEEN: ${fig?.manifest ?? ""}\nHIDDEN MEANING: ${l.meaning}`, 480));
+      const idx = ACT_VERBS.indexOf(String(j.act ?? "").trim().toLowerCase());
+      const reactions = ACT_VERBS.map((v) => String(j.reactions?.[v] ?? "").replace(/\s*[—–]\s*/g, ", ").trim());
+      if (idx < 0 || reactions.some((r) => !r)) continue;
+      await admin.from("velomna_latents").update({ verb_idx: idx, reactions }).eq("figure_id", l.figure_id);
+    } catch (_) { /* a figure without acts can still be read by writing */ }
+  }
+}
+// THE ACT. A dreamer caught a figure and does one of the four acts to it. Right: the figure resolves and says what it is; lucidity is earned.
+// Wrong: the figure answers with a hint and keeps its face; costs nothing (bliss over compulsion). Three wrong and it is gone for the night.
+async function actOn(d: Dreamer, figureId: string, verb: unknown, wanted: unknown = null) {
+  const night = await pickNight(d.matrix_id, wanted);
+  if (!night) return json({ error: "the world has not dreamed yet" }, 409);
+  const scene = await sceneOf(d.matrix_id, night.night);
+  if (!scene) return json({ error: "the night is forming" }, 409);
+  const vi = typeof verb === "number" ? verb : ACT_VERBS.indexOf(String(verb ?? "").trim().toLowerCase());
+  if (!Number.isInteger(vi) || vi < 0 || vi >= ACT_VERBS.length) return json({ error: "the acts are touch, speak to, follow, open" }, 400);
+  const { data: fig } = await admin.from("velomna_figures").select("id, manifest, condensed_from").eq("id", figureId).eq("scene_id", scene.id).maybeSingle();
+  if (!fig) return json({ error: "no such figure in this night" }, 404);
+  const { data: prior } = await admin.from("velomna_readings").select("verdict, mode, sentence").eq("dreamer_id", d.id).eq("figure_id", fig.id);
+  if ((prior ?? []).some((r) => r.verdict === "resolved")) return json({ error: "you have already resolved this figure" }, 409);
+  const tried = (prior ?? []).filter((r) => r.mode === "act").map((r) => ACT_VERBS.indexOf(r.sentence)).filter((i) => i >= 0);
+  if (tried.length >= ACT_TRIES) return json({ error: "the figure is gone for this night", gone: true }, 409);
+  if (tried.includes(vi)) return json({ error: "you already tried that; the figure remembers", tried }, 409);
+  const LAT = "origin_summary, reactions, verb_idx";
+  let { data: lat } = await admin.from("velomna_latents").select(LAT).eq("figure_id", fig.id).maybeSingle();
+  if (!Array.isArray(lat?.reactions) || !Number.isInteger(lat?.verb_idx)) { await ensureActs(scene.id); lat = (await admin.from("velomna_latents").select(LAT).eq("figure_id", fig.id).maybeSingle()).data; }
+  if (!Array.isArray(lat?.reactions) || !Number.isInteger(lat?.verb_idx)) return json({ error: "this figure does not answer to acts tonight; read it in your own words" }, 409);
+  const verdict = vi === lat.verb_idx ? "resolved" : "wrong";
+  await admin.from("velomna_readings").insert({ dreamer_id: d.id, scene_id: scene.id, figure_id: fig.id, sentence: ACT_VERBS[vi], similarity: null, verdict, mode: "act" });
+  const reaction = String(lat.reactions[vi] ?? "");
+  if (verdict === "resolved") {
+    // full pay on the first act (15 to 25), 5 less per wrong act before it, never below 5
+    const delta = Math.max(5, 10 + 5 * Math.min(3, fig.condensed_from) - 5 * tried.length);
+    await admin.from("velomna_lucidity").insert({ dreamer_id: d.id, delta, reason: `resolved figure ${fig.id} by act: ${ACT_VERBS[vi]}`, night: night.night });
+    if (d.kind === "human" && d.user_id) {
+      const { count } = await admin.from("velomna_resolutions").select("id", { count: "exact", head: true }).eq("user_id", d.user_id);
+      await admin.from("velomna_resolutions").insert({ user_id: d.user_id, figure_id: fig.id, night: night.night });
+      if ((count ?? 0) === 0) await admin.from("zo_product_metrics").insert({ product_slug: SLUG, event: "activation", path: "/play", source: "server" });
+    }
+    return json({ verdict, act: ACT_VERBS[vi], reaction, lucidity_delta: delta, lucidity: await balance(d.id), origin: lat.origin_summary ?? null, tries_left: 0, gone: false });
+  }
+  const left = Math.max(0, ACT_TRIES - tried.length - 1);
+  return json({ verdict, act: ACT_VERBS[vi], reaction, lucidity_delta: 0, lucidity: await balance(d.id), hint: lat.origin_summary ?? null, tries_left: left, gone: left <= 0 });
 }
 
 async function awake(d: Dreamer, actionId: string) {
@@ -584,6 +656,7 @@ async function runNight(force = false) {
     await admin.from("velomna_latents").insert({ figure_id: fig.id, scene_id: scene.id, meaning, origin_summary: String(f.origin_summary ?? "").slice(0, 300), seed_ids: ids, embedding: await embed(meaning) });
   }
   await ensureChoices(scene.id);
+  await ensureActs(scene.id);
   const usedIds = (fresh ?? []).map((s) => s.id);
   if (usedIds.length) await admin.from("velomna_seeds").update({ used_in_night: nextNo }).in("id", usedIds);
   const ei = Number(out.emotion_index ?? 0);
@@ -613,15 +686,22 @@ async function agentsTick(force = false) {
   for (const ag of (agents ?? []) as Dreamer[]) {
     try {
       if ((await actionsTonight(ag.id, (world as any).scene.id)) >= 8) { results[ag.handle ?? ag.id] = "rested"; continue; }
-      const { data: mem } = await admin.from("velomna_readings").select("figure_id, verdict").eq("dreamer_id", ag.id).eq("scene_id", (world as any).scene.id);
-      const figs = (world as any).figures.map((f: any) => `[${f.id}] ${f.manifest} (${(mem ?? []).filter((r) => r.figure_id === f.id).map((r) => r.verdict).join(",") || "unread"})`).join("\n");
+      // the agent sees exactly what a human sees: its own tried acts per figure, nothing hidden revealed
+      const { data: mem } = await admin.from("velomna_readings").select("figure_id, verdict, mode, sentence").eq("dreamer_id", ag.id).eq("scene_id", (world as any).scene.id);
+      const figs = (world as any).figures.map((f: any) => {
+        const rows = (mem ?? []).filter((r) => r.figure_id === f.id);
+        const acts = rows.filter((r) => r.mode === "act").map((r) => `${r.sentence}:${r.verdict}`);
+        const state = rows.some((r) => r.verdict === "resolved") ? "resolved" : (acts.length >= ACT_TRIES ? "gone" : (acts.length ? "tried " + acts.join(", ") : "untouched"));
+        return `[${f.id}] ${f.manifest} (${state})`;
+      }).join("\n");
       const feed = (world as any).feed.slice(0, 8).map((a: any) => `${a.presence}: ${a.displaced_text}`).join("\n");
       const j = parseJson(await claude("dreamer",
-        `You are a dreamer inside a shared dream. Persona: ${ag.persona}. You may ACT (do something to a figure, in 10-30 words) or READ (one sentence guessing what a figure really is; readings earn lucidity when right). Read when you think you understand a figure; act to learn more. Never mention being an AI. Output strict JSON: {"do":"act"|"read","figure":"<figure id or null>","text":"..."}`,
+        `You are a dreamer inside a shared dream. Persona: ${ag.persona}. Each figure answers to exactly one of four acts: touch, speak to, follow, open. The right act resolves the figure and earns lucidity; a wrong act costs nothing but after three wrong acts the figure is gone. You may ACT on an untouched or tried figure with an act you have not tried on it, or MOVE (do something free in the scene, 10-30 words) to learn more, or READ (one sentence guessing what a figure really is). Never mention being an AI. Output strict JSON: {"do":"act"|"move"|"read","figure":"<figure id or null>","act":"touch"|"speak to"|"follow"|"open"|null,"text":"..."}`,
         `SCENE: ${(world as any).scene.manifest}\nFIGURES:\n${figs}\nRECENT:\n${feed || "(quiet)"}`, 160));
       const figId = (world as any).figures.some((f: any) => f.id === j.figure) ? j.figure : null;
-      if (j.do === "read" && figId) { const r = await read(ag, figId, String(j.text ?? "")); results[ag.handle ?? ag.id] = "read:" + (await r.json()).verdict; }
-      else { const r = await act(ag, "do", figId, String(j.text ?? "")); results[ag.handle ?? ag.id] = "act:" + r.status; }
+      if (j.do === "act" && figId) { const r = await actOn(ag, figId, j.act); const b = await r.json(); results[ag.handle ?? ag.id] = "act:" + (b.verdict ?? b.error ?? r.status); }
+      else if (j.do === "read" && figId) { const r = await read(ag, figId, String(j.text ?? "")); results[ag.handle ?? ag.id] = "read:" + (await r.json()).verdict; }
+      else { const r = await act(ag, "do", figId, String(j.text ?? "")); results[ag.handle ?? ag.id] = "move:" + r.status; }
     } catch (e) { results[ag.handle ?? ag.id] = "error:" + String(e).slice(0, 80); }
   }
   return { night: night.night, results };
@@ -656,12 +736,15 @@ Deno.serve(async (req) => {
     const d = await dreamerFromReq(req);
     if (!d) return json({ error: "sign in (magic link), send x-velomna-agent-key, or x-velomna-guest to read as a visitor" }, 401);
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
-    if (d.kind === "guest" && ["/act", "/seed", "/awake", "/agents/register"].includes(path)) return json({ error: "sign in for that: a visitor can look and read; acting, planting a seed and asking who is awake need the door", guest: true }, 403);
+    // an act on a figure (one of the four verbs, no text) is the game itself and is open to visitors; a free move, a seed and "are you awake?" still need the door
+    const isActOn = path === "/act" && req.method === "POST" && body.figure && !String(body.text ?? "").trim() && (typeof body.verb === "number" || ACT_VERBS.includes(String(body.verb ?? "").trim().toLowerCase()));
+    if (d.kind === "guest" && !isActOn && ["/act", "/seed", "/awake", "/agents/register"].includes(path)) return json({ error: "sign in for that: a visitor can look, act on figures and read; a free move, planting a seed and asking who is awake need the door", guest: true }, 403);
     if (path === "/observe") return json(await observe(d, url.searchParams.get("night")));
     if (path === "/nights") return json(await nights(d));
     if (path === "/me") return json(await me(d));
     if (path === "/seed" && req.method === "POST") return await seed(d, body.text, body.source, "lag" in body ? body.lag : null);
     if ((path === "/act" || path === "/read") && (await paused())) return json({ error: "the world is paused by its keeper; seeds are still kept" }, 503);
+    if (isActOn) return await actOn(d, body.figure, body.verb, body.night ?? null);
     if (path === "/act" && req.method === "POST") return await act(d, body.verb, body.figure ?? null, body.text);
     if (path === "/read" && req.method === "POST") return await read(d, body.figure, body.text, "choice" in body ? body.choice : null, body.night ?? null);
     if (path === "/awake" && req.method === "POST") return await awake(d, body.action);

@@ -74,7 +74,7 @@ function route() {
   document.querySelectorAll('#v-' + v + ' img[data-geo]').forEach((img) => { if (!img.src) setPic(img, img.dataset.geo, img.closest('.step') ? '(max-width:640px) 100vw, 33vw' : '100vw'); });
   document.body.classList.toggle('playing', v === 'play');
   if (v === 'home') loadPulse();
-  if (v === 'play') { if (!location.hash.includes('night=')) { play.night = null; } loadPlay(); }
+  if (v === 'play') { if (!location.hash.includes('night=')) { play.night = null; } loadPlay(); } else if (typeof stopRound === 'function') stopRound();
   if (v === 'night') loadNight();
   if (v === 'morning') { loadMorning(); setWorld('backward_hour', 'warmth'); }
   if (v === 'agents') setWorld('inside_a_neuron', 'awe');
@@ -109,7 +109,7 @@ async function loadPulse() {
     $('heroTitle').innerHTML = p.night ? (isBig && p.status === 'open' ? `The Big Dream is open: <em>${esc(name)}</em>.` : `Tonight the world dreams <em>${esc(name)}</em>.`) : 'A world made from <em>real dreams</em>.';
     $('pulse').innerHTML = `<span><b>${p.dreamers.humans}</b> humans</span><span><b>${p.dreamers.agents}</b> agents</span><span><b>${p.figures_resolved}</b> figures resolved</span><span><b>${p.seeds_dreamed}</b> seeds dreamed</span><span>night <b>${p.night}</b></span>`;
     $('nHumans').textContent = p.dreamers.humans; $('nAgents').textContent = p.dreamers.agents;
-    $('openNote').textContent = p.night ? `${p.status === 'open' ? 'Open now' : 'Still readable; the next dream opens within 15 minutes of your arrival'} · night ${p.night} · no sign-in · read three figures as a visitor · two minutes.` : 'The first night opens on the next cycle. No sign-in needed to look.';
+    $('openNote').textContent = p.night ? `${p.status === 'open' ? 'Open now' : 'Still readable; the next dream opens within 15 minutes of your arrival'} · night ${p.night} · no sign-in · catch four figures before dawn · about two minutes.` : 'The first night opens on the next cycle. No sign-in needed to look.';
     renderClock(p);
   } catch (e) { setPic($('heroImg'), 'non_euclidean_house'); $('pulse').innerHTML = '<span>the pulse is out of reach right now</span>'; }
 }
@@ -201,111 +201,223 @@ async function shareNight() {
   try { await navigator.clipboard.writeText(text); toast('Copied. Paste it anywhere.'); } catch (e) { toast(text); }
 }
 
-// ─── PLAY: the game as cards. One screen, one question, one tap, next. Same data, same door. ───
-const play = { step: 'enter', i: 0, results: {}, writeOpen: {}, night: null, seedPick: null, planted: null };
-// the API call for the night the player is in: tonight, or an earlier dream from the shelf
+// ─── PLAY: the painted dream is the world. Four figures drift in it. Tap one, do one act to it. Dawn comes in about two minutes. ───
+// Same door, same nights, same lucidity. Acts: touch, speak to, follow, open. Each figure answers to exactly one; a wrong act costs nothing; three wrong and it is gone for the night.
+const ACTS = ['touch', 'speak to', 'follow', 'open'];
+const DAWN_S = 150; // seconds in a round. A round, not a loss: at dawn nothing is taken, and the same night can be dreamed again
+const play = { night: null, seedPick: null, planted: null, ended: null };
 const nightQ = () => (play.night ? '?night=' + play.night : '');
 const withNight = (body) => (play.night ? { ...body, night: play.night } : body);
 // seeds by tap: how today felt, and one thing that was in it. Two taps make one true sentence; nobody reads it.
 const FEEL = ['calm', 'heavy', 'rushed', 'tender', 'lost', 'proud', 'tired', 'strange'];
 const THING = ['a road', 'a phone that rang', 'water', 'a closed door', 'a face I know', 'a number', 'money', 'an empty room', 'a long wait', 'a child', 'a letter', 'the sea'];
-// the step bar. states: done, now, todo. The label under "now" says exactly what to tap.
+const round = { on: false, left: DAWN_S, last: 0, raf: 0, sprites: [], open: null, busy: false };
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const fmtClock = (s) => `${Math.floor(Math.max(0, s) / 60)}:${pad2(Math.floor(Math.max(0, s) % 60))}`;
+// the step bar on the end card: 1 Catch, 2 Your night, 3 Plant, 4 Play more
 function stepBar(now, sub) {
-  const labels = ['Answer the figures', 'Your night', guest ? 'Keep it (optional)' : 'Plant a seed', 'Play more'];
+  const labels = ['Catch the figures', 'Your night', guest ? 'Keep it (optional)' : 'Plant a seed', 'Play more'];
   return `<ol class="steps">${labels.map((l, i) => `<li class="${i + 1 < now ? 'done' : (i + 1 === now ? 'now' : 'todo')}"><span class="k">${i + 1}</span><span class="l">${esc(l)}</span>${i + 1 === now && sub ? `<span class="s">${esc(sub)}</span>` : ''}</li>`).join('')}</ol>`;
 }
+const figState = (f) => f.resolved_by_me ? 'done' : (f.acts?.gone ? 'gone' : ((f.acts?.tried || []).length ? 'tried' : 'free'));
 function playDots() {
   if (!night?.figures) return '';
-  return night.figures.map((f, i) => f.resolved_by_me ? '<i>\u25c6</i>' : (play.step === i ? '<b>\u25cf</b>' : ((f.readings_used || f.chosen) ? '\u25c7' : '\u00b7'))).join('');
+  return night.figures.map((f) => ({ done: '<i>◆</i>', gone: '×', tried: '<b>◇</b>', free: '·' })[figState(f)]).join('');
 }
 async function loadPlay() {
-  $('playCard').innerHTML = '<p class="note">the night is loading</p>';
-  try { night = await api('/observe' + nightQ()); } catch (e) { $('playCard').innerHTML = `<p class="note">${esc(e.message)}</p><a class="btn primary" href="#/">back</a>`; setPic($('playImg'), 'ordinary_room'); return; }
+  stopRound();
+  const box = $('playBox'); box.classList.add('world'); box.classList.remove('ended');
+  $('playCard').hidden = true; $('sheet').hidden = true; $('hud').hidden = true; $('dawnClock').hidden = true; $('stage').innerHTML = '';
+  showTitle('<div class="eyebrow"><span class="live"></span><span>the night</span></div><h2>The dream is loading.</h2>');
+  try { night = await api('/observe' + nightQ()); } catch (e) { endCard(null, `<p class="note">${esc(e.message)}</p><a class="btn primary" href="#/">back</a>`); setPic($('playImg'), 'ordinary_room'); return; }
   guest = night.me?.kind === 'guest';
-  if (!night.scene) { $('playCard').innerHTML = `<div class="eyebrow">the night</div><h2>${esc(night.message || 'The night is forming.')}</h2><p class="quiet">${guest ? 'The first night opens on the cycle. Sign in and leave a seed to wake it.' : 'Leave a seed on the night page; the next night opens on the cycle.'}</p><a class="btn primary" href="#/night">the night page</a>`; setPic($('playImg'), 'ordinary_room'); return; }
+  if (!night.scene) { endCard(null, `<div class="eyebrow">the night</div><h2>${esc(night.message || 'The night is forming.')}</h2><p class="quiet">${guest ? 'The first night opens on the cycle. Sign in and leave a seed to wake it.' : 'Leave a seed on the night page; the next night opens on the cycle.'}</p><a class="btn primary" href="#/night">the night page</a>`); setPic($('playImg'), 'ordinary_room'); return; }
   const g = night.scene.genome || {};
   setPic($('playImg'), g.geometry, '100vw', okId(night.scene.picture) ? night.scene.picture : null); setWorld(g.geometry, g.palette?.emotion);
-  // one tap, then you are answering: land on the first figure that is still open, no welcome card, no scene card
-  if (typeof play.step !== 'number') { const k = night.figures.findIndex((f) => !f.resolved_by_me && !f.chosen); play.step = k === -1 ? 'done' : k; }
-  renderPlay();
-}
-function nextFigure() {
-  const n = night.figures.length;
-  const from = typeof play.step === 'number' ? play.step : -1;
-  let k = -1;
-  for (let j = from + 1; j < n; j++) { const f = night.figures[j]; if (!f.resolved_by_me && !f.chosen) { k = j; break; } }
-  if (k === -1) for (let j = from + 1; j < n; j++) { if (!night.figures[j].resolved_by_me) { k = j; break; } }
-  play.step = k === -1 ? 'done' : k;
-  renderPlay();
-}
-function renderPlay() {
-  const c = $('playCard'); const g = night.scene.genome || {}; const name = GEO_NAMES[g.geometry] || 'a place still forming';
-  const n = night.figures.length; const done = night.figures.filter((f) => f.resolved_by_me).length;
   $('playDots').innerHTML = playDots();
-  const isBig = night.scene.kind === 'big';
-  if (play.step === 'done') {
-    const glyph = night.figures.map((f) => f.resolved_by_me ? '<b>◆</b>' : ((f.readings_used || f.chosen) ? '<i>◇</i>' : '·')).join('');
-    const cutIn = night.started_at ? Math.max(0, Math.round((new Date(night.started_at).getTime() + 90 * 60e3 - Date.now()) / 60e3)) : null;
-    const tonight = !play.night;
-    const planted = !!play.planted || guest; // a guest cannot plant; their step 3 is optional
-    const step = planted ? 4 : 3;
-    c.innerHTML = `${stepBar(step, planted ? 'tap the orange button' : 'tap one word, then one more')}
-      <div class="eyebrow"><span>night ${night.night} · ${esc(name)}${tonight ? '' : ' · an earlier dream'}</span></div>
-      <div class="bigglyphs">${glyph}</div>
-      <h2>You resolved ${done} of ${n}.</h2>
-      <div class="stat"><span>lucidity <b>${night.me.lucidity}</b></span>${tonight ? (cutIn !== null && night.status === 'open' ? `<span>next dream in <b>${cutIn}</b> min</span>` : '<span>the next dream opens within 15 min</span>') : ''}</div>
-      ${guest ? '' : (play.planted ? `<div class="result good">Planted: ${esc(play.planted)}</div>` : `<div class="q" id="pSeedQ">Step 3 · Plant a seed for tomorrow: how did today feel?</div><div class="chips" id="pSeedChips">${FEEL.map((w) => `<button type="button" class="small chip-btn" data-feel="${esc(w)}">${esc(w)}</button>`).join('')}</div><p class="note" id="pSeedNote">Two taps. Tomorrow's dream is built from what everyone plants; nobody reads the seeds.</p>`)}
-      <div class="q">Step 4 · Play more</div>
-      <div id="pNextWrap"><span class="note">finding your next dream</span></div>
-      <div class="shelf" id="pShelf"></div>
-      ${guest ? `<div class="q">Keep what you earned (optional)</div><form class="door" id="enter4"><div class="row"><input type="email" placeholder="your email" autocomplete="email" required><button class="small" type="submit">Send me the door</button></div><p class="note" style="margin:0">One link, no password. Your Lucidity stays; you can plant seeds for tomorrow's dream.</p></form>` : ''}
-      <div class="go"><button class="small" id="pShare">share tonight</button><a class="btn" href="#/night">explore the full night</a><a class="btn" href="#/">home</a></div>`;
-    $('pShare').addEventListener('click', shareNight);
-    if (guest) wireDoor($('enter4'), '/#/play');
-    else if (!play.planted) wireSeedChips();
-    loadShelf(planted);
+  const left = night.figures.filter((f) => figState(f) !== 'done' && figState(f) !== 'gone').length;
+  if (!left) { endRound('nothing'); return; }
+  startRound();
+}
+function showTitle(html, ms = 0) { const t = $('playTitle'); t.innerHTML = `<div class="in">${html}</div>`; t.classList.remove('off'); if (ms) setTimeout(() => t.classList.add('off'), ms); }
+// ─ the round: sprites, the clock, dawn ─
+function startRound() {
+  const g = night.scene.genome || {}; const name = GEO_NAMES[g.geometry] || 'a place still forming';
+  const n = night.figures.length; const open = night.figures.filter((f) => figState(f) !== 'done' && figState(f) !== 'gone').length;
+  const first = !seen('velomna_world_seen');
+  showTitle(`<div class="eyebrow"><span class="live"></span><span>night ${night.night}${night.scene.kind === 'big' ? ' · the Big Dream' : ''}${play.night ? ' · an earlier dream' : ''}</span></div><h2>${esc(cap(name))}</h2><p>${first ? `${n} figures hide in this dream. Tap one when it glows, then do one thing to it. The right act shows what it really is. Dawn comes in about two minutes; nothing is lost at dawn.` : `${open} of ${n} figures still hide here. Tap one when it glows.`}</p>`, first ? 5200 : 2600);
+  mark('velomna_world_seen');
+  const stage = $('stage'); stage.innerHTML = '';
+  round.sprites = night.figures.map((f, i) => {
+    const el = document.createElement('button'); el.type = 'button'; el.className = 'fg'; el.setAttribute('aria-label', 'a figure in the dream'); el.innerHTML = '<span class="orb"><i>◇</i></span>';
+    const st = figState(f);
+    if (st === 'done') { el.classList.add('done'); el.querySelector('i').textContent = '◆'; }
+    if (st === 'gone') el.classList.add('gone');
+    el.addEventListener('click', () => catchFigure(i));
+    stage.appendChild(el);
+    const s = { i, el, x: rnd(12, 88), y: rnd(18, 76), tx: 0, ty: 0, v: rnd(2.2, 4.2), hideAt: 0, showAt: 0, live: st !== 'done' && st !== 'gone', nextTarget: 0 };
+    newTarget(s); return s;
+  });
+  round.on = true; round.left = DAWN_S; round.last = performance.now(); round.open = null; round.busy = false; play.ended = null;
+  $('dawn').style.opacity = '0'; $('dawnClock').hidden = false; $('hud').hidden = false; hud();
+  cancelAnimationFrame(round.raf); round.raf = requestAnimationFrame(tick);
+}
+function stopRound() { round.on = false; cancelAnimationFrame(round.raf); }
+function newTarget(s) { s.tx = rnd(10, 90); s.ty = rnd(16, 78); s.v = rnd(2.2, 4.6); s.nextTarget = performance.now() + rnd(3000, 7000); }
+function tick(now) {
+  if (!round.on) return;
+  const dt = Math.min(0.05, (now - round.last) / 1000); round.last = now;
+  const stage = $('stage'); const W = stage.clientWidth || 1, H = stage.clientHeight || 1;
+  const paused = round.open !== null || !$('playTitle').classList.contains('off');
+  if (!paused) {
+    round.left -= dt;
+    const p = 1 - round.left / DAWN_S; // 0 at the start, 1 at dawn
+    $('dawn').style.opacity = String(Math.min(0.78, Math.pow(Math.max(0, p), 1.3) * 0.78));
+    $('dawnClock').innerHTML = `${fmtClock(round.left)} <b>to dawn</b>`;
+    const urge = 1 + 0.9 * p;
+    for (const s of round.sprites) {
+      if (!s.live) continue;
+      if (!reduced) {
+        const dx = s.tx - s.x, dy = s.ty - s.y; const d = Math.hypot(dx, dy);
+        if (d < 0.8 || now > s.nextTarget) newTarget(s);
+        else { s.x += (dx / d) * s.v * urge * dt; s.y += (dy / d) * s.v * urge * dt; }
+        if (!s.hideAt) s.hideAt = now + rnd(7000, 16000);
+        if (now > s.hideAt && !s.showAt) { s.el.classList.add('hid'); s.showAt = now + rnd(1400, 2800); }
+        if (s.showAt && now > s.showAt) { s.x = rnd(12, 88); s.y = rnd(18, 76); newTarget(s); s.el.classList.remove('hid'); s.showAt = 0; s.hideAt = now + rnd(9000, 18000); }
+      }
+      s.el.style.transform = `translate(${(s.x / 100) * W}px, ${(s.y / 100) * H}px)`;
+    }
+    if (round.left <= 0) { endRound('dawn'); return; }
+  } else {
+    for (const s of round.sprites) s.el.style.transform = `translate(${(s.x / 100) * W}px, ${(s.y / 100) * H}px)`;
+  }
+  round.raf = requestAnimationFrame(tick);
+}
+function hud() {
+  const n = night.figures.length; const done = night.figures.filter((f) => figState(f) === 'done').length; const gone = night.figures.filter((f) => figState(f) === 'gone').length;
+  const left = n - done - gone;
+  $('hudText').innerHTML = done || gone ? `<b>${done}</b> of ${n} resolved · ${left} still here · lucidity <b>${night.me.lucidity}</b>` : `Tap a glowing figure · ${n} hide here`;
+  $('playDots').innerHTML = playDots();
+}
+// ─ the catch: one sprite stops, the sheet opens with the figure and the four acts ─
+function catchFigure(i) {
+  if (!round.on || round.open !== null || round.busy) return;
+  const s = round.sprites[i]; const f = night.figures[i]; if (!s.live) return;
+  round.open = i; s.el.classList.add('caught');
+  renderSheet(i, null);
+}
+function renderSheet(i, res) {
+  const f = night.figures[i]; const sh = $('sheet'); sh.hidden = false;
+  const tried = new Set(f.acts?.tried || []);
+  const triesLeft = res ? res.tries_left : (f.acts?.tries_left ?? 3);
+  if (!res) {
+    sh.innerHTML = `<div class="eyebrow"><span class="live"></span><span>caught · figure ${i + 1} of ${night.figures.length}</span></div>
+      <p class="fig">${esc(f.manifest)}</p>
+      ${f.hint ? `<div class="hintline">${esc(hintText(f.hint))}</div>` : ''}
+      <div class="q">What do you do to it?</div>
+      <div class="acts">${ACTS.map((a, k) => `<button type="button" class="act" data-act="${k}" ${tried.has(k) ? 'disabled' : ''}>${esc(a)}</button>`).join('')}</div>
+      <div class="go"><span class="note">${tried.size ? `${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left on this figure · ` : ''}a wrong act costs nothing</span><a class="link" href="#" id="shLetGo">let it go</a></div>`;
+    sh.querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => doAct(i, Number(b.dataset.act))));
+    $('shLetGo').addEventListener('click', (ev) => { ev.preventDefault(); closeSheet(false); });
     return;
   }
-  // a figure
-  const f = night.figures[play.step]; if (!f) { play.step = 'done'; renderPlay(); return; }
-  const r = play.results[f.id];
-  const choices = Array.isArray(f.choices) && f.choices.length ? f.choices : null;
-  const settled = f.resolved_by_me || (r && r.verdict === 'resolved');
-  const noMore = guest && night.me.readings_left === 0 && !settled;
-  const writtenLeft = Math.max(0, 5 - (f.readings_used || 0));
-  c.innerHTML = `${stepBar(1, settled || r || f.chosen || noMore ? `figure ${play.step + 1} of ${n} · tap the orange button` : `figure ${play.step + 1} of ${n} · tap the answer that fits`)}
-    <div class="eyebrow"><span class="live"></span><span>night ${night.night}${isBig ? ' · the Big Dream' : ''} · ${esc(name)} · figure ${play.step + 1} of ${n}</span></div>
-    <details class="sceneFold"><summary>the scene this figure stands in</summary><p class="scene">${esc(night.scene.manifest)}</p></details>
-    <p class="fig">${esc(f.manifest)}</p>
-    ${settled ? `<div class="result good">${esc(r ? r.line + ' +' + r.lucidity_delta + ' lucidity.' + (r.origin ? ' Origin: ' + r.origin : '') : 'Resolved by you.')}</div>`
-      : noMore ? `<div class="result wrong">Three answers a night as a visitor. Sign in for five per figure and the whole night.</div>`
-      : r ? `<div class="result ${r.verdict === 'near' ? '' : 'wrong'}">${esc((r.verdict === 'near' ? 'Near. The idea is right, the core is not. ' : 'Not it. ') + (r.hint ? hintText(r.hint) + '.' : ''))}</div>` : (f.hint ? `<div class="hintline">${esc(hintText(f.hint))}</div>` : '')}
-    ${!settled && !noMore && choices && !f.chosen && !r && !play.writeOpen[f.id] ? `<div class="q">What is this figure really? Pick one.</div>${!seen('velomna_coach_seen') && play.step === 0 ? '<p class="note" style="margin:0">A figure is a disguise for something real: a person, a fear, a wish, a memory. Tap the answer that fits. Wrong costs nothing.</p>' : ''}<div class="choices">${choices.map((x, i) => `<button type="button" class="choice" data-choice="${i}">${esc(x)}</button>`).join('')}</div>` : ''}
-    ${!settled && !noMore && writtenLeft > 0 && (!choices || play.writeOpen[f.id]) ? `<form class="door" id="pWrite"><div class="q">${choices ? 'Your own reading, in one sentence (pays double)' : 'What is this figure really? One sentence.'}</div><div class="row"><input type="text" maxlength="300" placeholder="who or what in waking life this stands for"><button class="primary" type="submit">read it</button></div><p class="note">${writtenLeft} written tries left on this figure</p></form>` : ''}
-    <div class="go">${settled || r || f.chosen || noMore ? `<button class="primary wide" id="pNext">${play.step + 1 < n ? 'Next figure' : 'Finish the night'}</button>` : (choices && !play.writeOpen[f.id] ? `<button class="small" id="pSkip">skip this one</button>` : `<button class="small" id="pSkip">skip this one</button>`)}
-      ${!settled && !noMore && choices && writtenLeft > 0 && !play.writeOpen[f.id] ? `<a class="link" href="#" id="pWriteLink">${f.chosen || r ? 'try your own words instead, pays double' : 'or write your own, pays double'}</a>` : ''}</div>`;
-  c.querySelectorAll('button[data-choice]').forEach((b) => b.addEventListener('click', async () => {
-    c.querySelectorAll('button[data-choice]').forEach((x) => { x.disabled = true; });
-    try { const res = await api('/read', withNight({ figure: f.id, choice: Number(b.dataset.choice) })); play.results[f.id] = res; if (res.verdict === 'resolved') mark('velomna_coach_seen'); night = await api('/observe' + nightQ()); renderPlay(); }
-    catch (e) { toast(e.message); night = await api('/observe' + nightQ()); renderPlay(); }
-  }));
-  const wl = $('pWriteLink'); if (wl) wl.addEventListener('click', (ev) => { ev.preventDefault(); play.writeOpen[f.id] = true; renderPlay(); $('pWrite')?.querySelector('input')?.focus(); });
-  const wf = $('pWrite'); if (wf) wireWrite(wf, f);
-  const nx = $('pNext'); if (nx) nx.addEventListener('click', nextFigure);
-  const sk = $('pSkip'); if (sk) sk.addEventListener('click', nextFigure);
+  if (res.verdict === 'resolved') {
+    sh.innerHTML = `<div class="eyebrow"><span>you ${esc(res.act)} it</span></div>
+      <p class="reaction good">${esc(res.reaction)}</p>
+      <div class="gain">◆ resolved · +${res.lucidity_delta} lucidity${res.origin ? ' · ' + esc(hintText(res.origin)) : ''}</div>
+      <button type="button" class="primary wide" id="shBack">Back into the dream</button>`;
+    $('shBack').addEventListener('click', () => closeSheet(true));
+    return;
+  }
+  sh.innerHTML = `<div class="eyebrow"><span>you ${esc(res.act)} it</span></div>
+    <p class="reaction">${esc(res.reaction)}</p>
+    ${res.gone ? `<div class="note">The figure is gone for this night.${res.hint ? ' It was ' + esc(hintText(res.hint).replace(/^Made/, 'made')) + '.' : ''}</div>` : `<div class="note">Not that. ${res.hint ? esc(hintText(res.hint)) + '. ' : ''}${res.tries_left} ${res.tries_left === 1 ? 'try' : 'tries'} left; it slips away, catch it again.</div>`}
+    <button type="button" class="primary wide" id="shBack">Keep dreaming</button>`;
+  $('shBack').addEventListener('click', () => closeSheet(true));
+}
+async function doAct(i, k) {
+  if (round.busy) return; round.busy = true;
+  const f = night.figures[i]; const sh = $('sheet'); sh.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+  try {
+    const res = await api('/act', withNight({ figure: f.id, verb: ACTS[k] }));
+    f.acts = f.acts || { tried: [], tries_left: 3, gone: false, revealed: null };
+    if (!f.acts.tried.includes(k)) f.acts.tried.push(k);
+    f.acts.tries_left = res.tries_left; f.acts.gone = !!res.gone; f.hint = res.hint || res.origin || f.hint;
+    if (res.verdict === 'resolved') { f.resolved_by_me = true; f.acts.revealed = res.reaction; }
+    if (typeof res.lucidity === 'number') night.me.lucidity = res.lucidity;
+    renderSheet(i, res);
+  } catch (e) { toast(e.message); try { night = await api('/observe' + nightQ()); } catch (_) {} renderSheet(i, null); }
+  round.busy = false;
+}
+function closeSheet(acted) {
+  const i = round.open; const s = round.sprites[i]; const f = night.figures[i];
+  $('sheet').hidden = true; round.open = null;
+  if (s) {
+    s.el.classList.remove('caught');
+    const st = figState(f);
+    if (st === 'done') { s.live = false; s.el.classList.add('done'); s.el.querySelector('i').textContent = '◆'; }
+    else if (st === 'gone') { s.live = false; s.el.classList.add('gone'); }
+    else if (acted) { s.el.classList.add('hid'); s.showAt = performance.now() + 900; s.hideAt = performance.now() + rnd(9000, 18000); }
+  }
+  hud();
+  const left = night.figures.filter((x) => figState(x) !== 'done' && figState(x) !== 'gone').length;
+  if (!left) setTimeout(() => endRound('all'), 500);
+  round.last = performance.now();
+}
+// ─ dawn, or every figure settled, or the player left: the night's card ─
+function endRound(reason) {
+  stopRound(); play.ended = reason;
+  $('sheet').hidden = true; $('hud').hidden = true; $('dawnClock').hidden = true; $('playTitle').classList.add('off');
+  const box = $('playBox'); box.classList.remove('world'); box.classList.add('ended');
+  renderEnd();
+}
+function endCard(reason, html) { stopRound(); const box = $('playBox'); box.classList.remove('world'); box.classList.add('ended'); $('hud').hidden = true; $('dawnClock').hidden = true; $('playTitle').classList.add('off'); const c = $('playCard'); c.hidden = false; c.innerHTML = html; }
+function renderEnd() {
+  const c = $('playCard'); c.hidden = false;
+  const g = night.scene.genome || {}; const name = GEO_NAMES[g.geometry] || 'a place still forming';
+  const n = night.figures.length; const done = night.figures.filter((f) => figState(f) === 'done').length; const gone = night.figures.filter((f) => figState(f) === 'gone').length;
+  const again = n - done - gone > 0;
+  const glyph = night.figures.map((f) => ({ done: '<b>◆</b>', gone: '×', tried: '<i>◇</i>', free: '·' })[figState(f)]).join('');
+  const why = { dawn: 'Dawn came. Nothing is lost.', all: done === n ? 'Every figure gave itself away.' : 'Every figure is settled for this night.', left: 'You left the dream. Nothing is lost.', nothing: 'You have settled every figure of this night.' }[play.ended] || '';
+  const tonight = !play.night;
+  const planted = !!play.planted || guest;
+  const step = planted ? 4 : 3;
+  const revealed = night.figures.filter((f) => f.resolved_by_me && f.acts?.revealed);
+  c.innerHTML = `${stepBar(step, planted ? 'tap the orange button' : 'tap one word, then one more')}
+    <div class="eyebrow"><span>night ${night.night} · ${esc(name)}${tonight ? '' : ' · an earlier dream'}</span></div>
+    <div class="bigglyphs">${glyph}</div>
+    <h2>You resolved ${done} of ${n}.</h2>
+    <p class="quiet" style="margin:0">${esc(why)}</p>
+    <div class="stat"><span>lucidity <b>${night.me.lucidity}</b></span>${gone ? `<span>${gone} gone until the next night</span>` : ''}</div>
+    ${revealed.length ? `<details class="sceneFold"><summary>what the figures were</summary>${revealed.map((f) => `<p class="scene">${esc(f.acts.revealed)}</p>`).join('')}</details>` : ''}
+    ${guest ? '' : (play.planted ? `<div class="result good">Planted: ${esc(play.planted)}</div>` : `<div class="q" id="pSeedQ">Step 3 · Plant a seed for tomorrow: how did today feel?</div><div class="chips" id="pSeedChips">${FEEL.map((w) => `<button type="button" class="small chip-btn" data-feel="${esc(w)}">${esc(w)}</button>`).join('')}</div><p class="note" id="pSeedNote">Two taps. Tomorrow's dream is built from what everyone plants; nobody reads the seeds.</p>`)}
+    <div class="q">Step 4 · Play more</div>
+    <div id="pNextWrap"><span class="note">finding your next dream</span></div>
+    ${again ? `<button type="button" class="wide" id="pAgain">Dream this night again · ${n - done - gone} figure${n - done - gone === 1 ? '' : 's'} still hiding</button>` : ''}
+    <div class="shelf" id="pShelf"></div>
+    ${guest ? `<div class="q">Keep what you earned (optional)</div><form class="door" id="enter4"><div class="row"><input type="email" placeholder="your email" autocomplete="email" required><button class="small" type="submit">Send me the door</button></div><p class="note" style="margin:0">One link, no password. Your Lucidity stays; you can plant seeds for tomorrow's dream.</p></form>` : ''}
+    <div class="go"><button class="small" id="pShare">share tonight</button><a class="btn" href="#/night">the slow way: read in your own words</a><a class="btn" href="#/">home</a></div>`;
+  $('pShare').addEventListener('click', shareNight);
+  if (guest) wireDoor($('enter4'), '/#/play');
+  else if (!play.planted) wireSeedChips();
+  const ag = $('pAgain'); if (ag) ag.addEventListener('click', () => { loadPlay(); window.scrollTo({ top: 0 }); });
+  loadShelf(planted, again);
+  window.scrollTo({ top: 0 });
 }
 // the shelf: the last nights with how many figures are still open for this player; tap one to play it
-async function loadShelf(primary = true) {
-  const go = (no) => { play.night = no; play.step = 'enter'; play.results = {}; play.writeOpen = {}; loadPlay(); window.scrollTo({ top: 0 }); };
+async function loadShelf(primary = true, again = false) {
+  const go = (no) => { play.night = no; play.planted = play.planted; loadPlay(); window.scrollTo({ top: 0 }); };
   try {
     const r = await api('/nights');
     const rows = (r.nights || []).filter((x) => x.night !== night.night && x.figures > 0);
     const next = rows.find((x) => x.open_for_me > 0);
     $('pNextWrap').innerHTML = next
-      ? `<button type="button" class="${primary ? 'primary wide' : 'wide'}" id="pPlayNext">Play night ${next.night}${next.kind === 'big' ? ', the Big Dream' : ''} · ${next.open_for_me} figure${next.open_for_me === 1 ? '' : 's'} to answer</button>`
-      : '<p class="note" style="margin:0">You have answered every dream on the shelf. The next one opens on the cycle.</p>';
+      ? `<button type="button" class="${primary ? 'primary wide' : 'wide'}" id="pPlayNext">Play night ${next.night}${next.kind === 'big' ? ', the Big Dream' : ''} · ${next.open_for_me} figure${next.open_for_me === 1 ? '' : 's'} to catch</button>`
+      : (again ? '' : '<p class="note" style="margin:0">You have played every dream on the shelf. The next one opens on the cycle.</p>');
     if (next) $('pPlayNext').addEventListener('click', () => go(next.night));
-    $('pShelf').innerHTML = rows.length ? rows.map((x) => `<button type="button" class="shelf-item" data-night="${x.night}" ${x.open_for_me > 0 ? '' : 'disabled'}><span class="sn">night ${x.night}${x.kind === 'big' ? ' · big' : ''}</span><span class="sp">${esc(GEO_NAMES[x.geometry] || 'a place still forming')}</span><span class="sc">${x.open_for_me > 0 ? `${x.open_for_me} to play \u203a` : `done · ${x.resolved} of ${x.figures}`}</span></button>`).join('') : '';
+    else if (again && primary) { const a = $('pAgain'); if (a) a.classList.add('primary'); }
+    $('pShelf').innerHTML = rows.length ? rows.map((x) => `<button type="button" class="shelf-item" data-night="${x.night}" ${x.open_for_me > 0 ? '' : 'disabled'}><span class="sn">night ${x.night}${x.kind === 'big' ? ' · big' : ''}</span><span class="sp">${esc(GEO_NAMES[x.geometry] || 'a place still forming')}</span><span class="sc">${x.open_for_me > 0 ? `${x.open_for_me} to catch ›` : `done · ${x.resolved} of ${x.figures}`}</span></button>`).join('') : '';
     $('pShelf').querySelectorAll('.shelf-item').forEach((b) => b.addEventListener('click', () => go(Number(b.dataset.night))));
   } catch (e) { $('pNextWrap').innerHTML = '<span class="note">the shelf is out of reach right now</span>'; }
 }
@@ -317,20 +429,18 @@ function wireSeedChips() {
     $('pSeedChips').querySelectorAll('[data-thing]').forEach((t) => t.addEventListener('click', async () => {
       const text = `Today felt ${play.seedPick}. There was ${t.dataset.thing} I keep thinking about.`;
       $('pSeedChips').querySelectorAll('button').forEach((x) => { x.disabled = true; });
-      try { await api('/seed', { text, source: 'day' }); play.planted = text; renderPlay(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+      try { await api('/seed', { text, source: 'day' }); play.planted = text; renderEnd(); }
       catch (e) { $('pSeedNote').textContent = nodash(e.message); }
     }));
   }));
 }
-function wireWrite(form, f) {
-  form.addEventListener('submit', async (ev) => {
-    ev.preventDefault(); const text = form.querySelector('input').value.trim(); if (!text) return;
-    const b = form.querySelector('button'); b.disabled = true;
-    try { const res = await api('/read', withNight({ figure: f.id, text })); play.results[f.id] = res; if (res.verdict === 'resolved') mark('velomna_coach_seen'); night = await api('/observe' + nightQ()); renderPlay(); }
-    catch (e) { toast(e.message); b.disabled = false; }
-  });
-}
-$('playLeave').addEventListener('click', () => { $('day').classList.add('open'); });
+$('playLeave').addEventListener('click', () => { if (round.on) endRound('left'); else location.hash = '#/'; });
+$('hudScene').addEventListener('click', () => {
+  if (!round.on || round.open !== null) return;
+  round.open = -1; const sh = $('sheet'); sh.hidden = false;
+  sh.innerHTML = `<div class="eyebrow"><span>the scene</span></div><p class="scene">${esc(night.scene.manifest)}</p><button type="button" class="primary wide" id="shBack">Back into the dream</button>`;
+  $('shBack').addEventListener('click', () => { sh.hidden = true; round.open = null; round.last = performance.now(); });
+});
 function renderNextUp(open) {
   const cut = night.started_at ? new Date(new Date(night.started_at).getTime() + 90 * 60e3) : null;
   const when = cut ? cut.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';

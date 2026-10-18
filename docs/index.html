@@ -96,7 +96,7 @@ form.door.compact input{padding:11px 14px;font-size:15px}
 .coach .go{grid-column:1/-1;display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-top:6px;border-top:1px solid rgba(232,163,90,.25)}
 .figure.first{box-shadow:0 0 0 2px var(--accent),0 0 40px rgba(232,163,90,.18)}
 .figure .hint{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
-.figure .hintline{font-family:var(--font-mono);font-size:12px;color:var(--accent-2);border-left:2px solid var(--accent);padding-left:10px}
+.figure .hintline,.sheet .hintline{font-family:var(--font-mono);font-size:12px;color:var(--accent-2);border-left:2px solid var(--accent);padding-left:10px}
 .figure .q{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);margin-top:4px}
 .choices{display:grid;gap:8px}
 .choice{text-align:left;font-family:var(--font-display);font-size:15px;letter-spacing:0;border-radius:12px;padding:11px 14px;line-height:1.35;backdrop-filter:none;background:rgba(236,230,216,.04)}
@@ -195,13 +195,60 @@ section.block{padding-block:clamp(56px,9vw,110px)}
 .day.open{display:flex}
 .day h1{color:#2a2418;max-width:none}.day p{color:#5a4f3d;margin-inline:auto}.day button{color:#2a2418;border-color:#2a2418;background:none}
 .view{display:none}.view.open{display:block}
-/* PLAY: the game as cards. Nothing else on screen. */
+/* PLAY: the painted dream is the world. Figures drift in it; one tap catches one; a sheet asks for one act. */
 body.playing .top{display:none}
+[hidden]{display:none!important}
 .play{position:relative;min-height:100svh;display:grid;place-items:center;isolation:isolate;overflow:hidden;padding-block:84px 40px}
+.play.world{height:100svh;min-height:0;padding:0;place-items:stretch;touch-action:manipulation;user-select:none;-webkit-user-select:none}
 .play .pic{position:absolute;inset:0;z-index:0;overflow:hidden;background:#0b0912}
 .play .veil{position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg,rgba(6,5,10,.6),rgba(6,5,10,.55) 50%,rgba(6,5,10,.85))}
-.playTop{position:absolute;top:0;left:0;right:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:max(16px,env(safe-area-inset-top,0px))}
-.playTop .row{gap:14px}
+.play.world .veil{background:linear-gradient(180deg,rgba(6,5,10,.55),rgba(6,5,10,.12) 28%,rgba(6,5,10,.12) 68%,rgba(6,5,10,.6))}
+.play .dawn{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:0;background:linear-gradient(180deg,#fff3da,#f2dcb6 60%,#e6c79a);mix-blend-mode:screen;transition:opacity .6s linear}
+.play.ended .dawn,.play.ended .stage,.play.ended .hud,.play.ended .sheet{display:none}
+.stage{position:absolute;inset:0;z-index:2}
+.fg{position:absolute;left:0;top:0;width:84px;height:84px;margin:-42px 0 0 -42px;border:0;background:none;padding:0;cursor:pointer;display:grid;place-items:center;border-radius:50%;transition:opacity .9s ease;will-change:transform;-webkit-tap-highlight-color:transparent}
+.fg .orb{width:52px;height:52px;border-radius:50%;background:radial-gradient(circle at 50% 50%,rgba(255,236,200,.95) 0,rgba(240,179,111,.85) 28%,rgba(232,163,90,.35) 55%,rgba(232,163,90,0) 72%);box-shadow:0 0 28px 8px rgba(232,163,90,.35),0 0 60px 20px rgba(232,163,90,.12);display:grid;place-items:center;animation:breathe 2.4s ease-in-out infinite;transition:transform .35s ease}
+.fg .orb i{font-style:normal;font-family:var(--font-mono);font-size:15px;color:#1a1208}
+.fg:hover .orb,.fg:focus-visible .orb{transform:scale(1.18)}
+.fg:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+.fg.hid{opacity:0;pointer-events:none}
+.fg.caught .orb{transform:scale(1.45);animation:none}
+.fg.done{cursor:default;pointer-events:none}
+.fg.done .orb{animation:none;background:radial-gradient(circle,rgba(143,211,168,.95) 0,rgba(143,211,168,.5) 45%,rgba(143,211,168,0) 72%);box-shadow:0 0 22px 6px rgba(143,211,168,.25)}
+.fg.gone{cursor:default;pointer-events:none;opacity:.28}
+.fg.gone .orb{animation:none;background:radial-gradient(circle,rgba(236,230,216,.5) 0,rgba(236,230,216,.15) 45%,rgba(236,230,216,0) 72%);box-shadow:none}
+@keyframes breathe{0%,100%{transform:scale(.92)}50%{transform:scale(1.08)}}
+@media (prefers-reduced-motion:reduce){.fg .orb{animation:none}}
+.playTop{position:absolute;top:0;left:0;right:0;z-index:6;display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:max(16px,env(safe-area-inset-top,0px))}
+.playTop .row{gap:10px}
+.pill{display:inline-flex;align-items:center;gap:8px;background:rgba(6,5,10,.66);backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:999px;padding:8px 13px;font-family:var(--font-mono);font-size:12px;letter-spacing:.04em;color:var(--ink);white-space:nowrap}
+.pill b{color:var(--accent-2);font-weight:500;font-size:inherit;font-family:inherit;letter-spacing:inherit}
+.playTop .row{flex-wrap:nowrap}
+.pill.clock{font-variant-numeric:tabular-nums}
+.pill.asbtn{cursor:pointer;color:var(--ink-2)}
+.pill.asbtn:hover{border-color:var(--accent);color:var(--ink)}
+.hud{position:absolute;left:var(--gutter-l);right:var(--gutter-r);bottom:max(18px,env(safe-area-inset-bottom,0px));z-index:4;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.title{position:absolute;inset:0;z-index:5;display:grid;place-items:center;text-align:center;padding:0 var(--gutter-l);background:rgba(6,5,10,.42);transition:opacity .9s ease;pointer-events:none}
+.title.off{opacity:0}
+.title .in{display:grid;gap:10px;max-width:34rem;justify-items:center}
+.title h2{margin:0;font-size:clamp(1.6rem,4vw,2.6rem)}
+.title p{margin:0;max-width:30rem;color:var(--ink-2);font-size:1.05rem}
+.sheet{position:absolute;left:50%;bottom:0;transform:translateX(-50%);z-index:7;width:min(600px,100%);background:rgba(6,5,10,.92);backdrop-filter:blur(18px);border:1px solid var(--line);border-bottom:0;border-radius:22px 22px 0 0;padding:20px clamp(18px,4vw,30px) max(24px,env(safe-area-inset-bottom,0px));display:grid;gap:12px;animation:sheetin .35s ease;max-height:88svh;overflow:auto}
+@keyframes sheetin{from{transform:translate(-50%,24px);opacity:0}to{transform:translateX(-50%);opacity:1}}
+.sheet .fig{font-size:clamp(1.05rem,1.7vw,1.3rem);line-height:1.45;font-weight:300;margin:0}
+.sheet .q{margin:0}
+.acts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.act{font-family:var(--font-display);font-size:17px;letter-spacing:0;padding:16px 14px;border-radius:14px;background:rgba(232,163,90,.12);border:1px solid rgba(232,163,90,.55);color:var(--ink);backdrop-filter:none;text-transform:none}
+.act:hover:not([disabled]){background:rgba(232,163,90,.24);border-color:var(--accent)}
+.act[disabled]{opacity:.32;text-decoration:line-through;cursor:default}
+.sheet .reaction{border-left:2px solid var(--accent);padding:6px 0 6px 14px;font-style:italic;font-size:1.08rem;line-height:1.5;margin:0}
+.sheet .reaction.good{border-color:var(--good)}
+.sheet .gain{font-family:var(--font-mono);font-size:13px;color:var(--good)}
+.sheet .go{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.sheet .go .link{margin-left:auto}
+.sheet button.primary.wide{width:100%;padding:15px 20px;font-size:15px}
+.sheet .scene{font-size:1rem;line-height:1.6;font-weight:300;margin:0}
+@media (min-width:720px){.sheet{bottom:auto;top:50%;transform:translate(-50%,-50%);border-bottom:1px solid var(--line);border-radius:22px;max-height:84svh}@keyframes sheetin{from{transform:translate(-50%,calc(-50% + 16px));opacity:0}to{transform:translate(-50%,-50%);opacity:1}}}
 .dots{font-family:var(--font-mono);font-size:14px;letter-spacing:.32em;color:var(--ink-3)}
 .dots b{color:var(--accent);font-weight:400}.dots i{color:var(--good);font-style:normal}
 .card{position:relative;z-index:2;width:min(640px,calc(100% - 2*var(--gutter-l)));background:rgba(6,5,10,.84);backdrop-filter:blur(16px);border:1px solid var(--line);border-radius:22px;padding:clamp(20px,4vw,34px);display:grid;gap:14px;animation:cardin .5s ease}
@@ -302,7 +349,7 @@ footer a{color:var(--ink-2);text-decoration:none}
         <p class="lead">Leave one dream, or one true thing from your day. The night folds it into other people's seeds until nobody can tell whose it was. Then everyone walks through what came back.</p>
         <div class="cta">
           <a class="btn primary big" href="#/play" id="enterNow">Play tonight's dream</a>
-          <span class="note" id="openNote">Open now. Four questions, four taps. No sign-in.</span>
+          <span class="note" id="openNote">Open now. Catch four figures before dawn. About two minutes, no sign-in.</span>
         </div>
         <form class="door compact" id="enter">
           <div class="row"><input type="email" id="email" placeholder="your email, to keep what you earn" autocomplete="email" required><button type="submit">Send me the door</button></div>
@@ -319,7 +366,7 @@ footer a{color:var(--ink-2);text-decoration:none}
         <div class="steps">
           <div class="step reveal"><img data-geo="ordinary_room" alt="" loading="lazy" decoding="async"><div class="t"><div class="n">01 · SEED</div><h3>Leave one dream</h3><p>Or one true thing from today. Four words or more. Nobody will ever read these words, not even the agents.</p></div></div>
           <div class="step reveal"><img data-geo="non_euclidean_house" alt="" loading="lazy" decoding="async"><div class="t"><div class="n">02 · CONDENSE</div><h3>The night builds a scene</h3><p>Your seed is folded with at least two others into figures. A room, a street, a sky. Each figure hides what it was made of.</p></div></div>
-          <div class="step reveal"><img data-geo="inside_a_neuron" alt="" loading="lazy" decoding="async"><div class="t"><div class="n">03 · READ</div><h3>Say what a figure really is</h3><p>Act on it, watch the dream answer, then read it in one sentence. Right, and it resolves: you earn Lucidity and see its origin. Wrong costs nothing.</p></div></div>
+          <div class="step reveal"><img data-geo="inside_a_neuron" alt="" loading="lazy" decoding="async"><div class="t"><div class="n">03 · CATCH AND ACT</div><h3>Catch a figure, do one thing to it</h3><p>Touch it, speak to it, follow it, or open it. The right act makes the figure give itself away: you earn Lucidity and see what it was made of. Wrong costs nothing. Dawn comes in about two minutes, and nothing is lost at dawn.</p></div></div>
         </div>
         <p class="quiet reveal" style="margin-top:30px"><b style="color:var(--ink);font-weight:400">You never wait for VELOMNA.</b> A dream is open now and a new one opens every 90 minutes; walk into whichever one is on. Once a day there is also the Big Dream: at 21:00 Toronto the whole world dreams one dream together, built from more seeds than any other night. Miss it and nothing is lost.</p>
         <div class="clock reveal" id="bigClock" hidden></div>
@@ -373,17 +420,22 @@ footer a{color:var(--ink-2);text-decoration:none}
     </section>
   </section>
 
-  <!-- PLAY: one card, one question, one tap, next -->
+  <!-- PLAY: the painted dream is the world. Four figures drift through it; tap one, do one act to it; dawn comes in about two minutes. -->
   <section class="view" id="v-play">
-    <div class="play">
+    <div class="play world" id="playBox">
       <div class="pic"><img id="playImg" alt="" decoding="async"></div>
       <div class="veil"></div>
+      <div class="dawn" id="dawn"></div>
+      <div class="stage" id="stage" aria-label="the dream"></div>
       <div class="playTop wrap">
         <a class="word" href="#/">VELOMNA</a>
         <span class="dots" id="playDots" aria-label="progress"></span>
-        <span class="row"><a class="link" href="#/night">full night</a><button class="small" id="playLeave" title="End the night instantly. No cost.">daylight</button></span>
+        <span class="row"><span class="pill clock" id="dawnClock" hidden></span><button class="small" id="playLeave" title="Leave the dream. Nothing is lost.">leave</button></span>
       </div>
-      <div class="card" id="playCard"><p class="note">the night is loading</p></div>
+      <div class="title off" id="playTitle" aria-live="polite"></div>
+      <div class="hud" id="hud" hidden><span class="pill" id="hudText">Tap a glowing figure</span><button type="button" class="pill asbtn" id="hudScene">the scene</button></div>
+      <div class="sheet" id="sheet" hidden></div>
+      <div class="card" id="playCard" hidden></div>
     </div>
   </section>
 
@@ -405,7 +457,7 @@ footer a{color:var(--ink-2);text-decoration:none}
         <div class="c"><div class="n">1 · LOOK</div><div class="h">Read the scene</div><p>It is the paragraph just below this card: what the night built from everyone's seeds. Nobody's words appear as typed.</p></div>
         <div class="c"><div class="n">2 · READ</div><div class="h">Pick what a figure really is</div><p>Under each figure are four plain answers. Click the one that fits. One click per figure; or write your own, which pays double.</p></div>
         <div class="c"><div class="n">3 · KEEP</div><div class="h">Resolve one and it stays yours</div><p>Lucidity is earned only this way. Sign in to act inside the dream and plant your own seed for tomorrow.</p></div>
-        <div class="go"><button class="primary" id="startHere" type="button">Start here: take me to the first figure</button><span class="note">two minutes; a wrong click costs nothing and earns a hint</span></div>
+        <div class="go"><button class="primary" id="startHere" type="button">Start here: take me into the dream</button><span class="note">this page is the slow way: the written readings. The game itself is one tap away.</span></div>
       </div>
       <div class="progress" id="progress"></div>
       <p class="scene" id="sceneText"></p>
